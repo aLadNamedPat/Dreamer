@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 from ReplayBuffer import Buffer 
+from RSSM import RSSM
+from torch.distributions.multivariate_normal import MultivariateNormal
 
 device = torch.device("cuda")
 
@@ -16,7 +18,8 @@ class Dreamer(nn.Module):
             lambda_ : float = 0.95,
             batch_size : int = 50,
             batch_train_freq : int = 50,
-            buffer_size : int = 1e8
+            buffer_size : int = 1e8,
+            sample_steps : int = 1000,
             ):
         super(Dreamer, self).__init__()
 
@@ -26,6 +29,7 @@ class Dreamer(nn.Module):
 
         
         self.env = env
+        self.action_space = env.action_space
         self.input_dims = input_dims
         self.output_dims = output_dims
         self.action_space = action_space
@@ -59,9 +63,8 @@ class Dreamer(nn.Module):
             self,
             states : torch.Tensor,
             ):
-
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
-
+        self.batch_sample = self.replayBuffer.sample()
         rewards = self.rewards(states)
         values = self.critic(states)
 
@@ -78,7 +81,7 @@ class Dreamer(nn.Module):
         self.actor_optimizer.step()
 
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=8e-5)
-        # critic_distribution  = Unimplemented, figure this part out in code
+        critic_distribution  = self.critic(self.batch_sample)
 
         critic_loss = -torch.mean(values.log_prob(returns))# For value loss (critic loss), we want to find the log probability of finding that returns for the given value predicte
 
@@ -116,12 +119,16 @@ class Dreamer(nn.Module):
             self.rollout()
             data_points = self.replayBuffer.sample()
             self.update(data_points)
-
+        
     def sample_action(
         self,
-        pixels : np.array,
-    ) -> np.array:
-        return
+        pixels : torch.Tensor,
+    ) -> torch.Tensor:
+        if (self.num_timesteps < self.sample_steps):
+            return np.random.uniform(low=-1.0, high=1.0, size=self.env.action_spec().shape)
+        else:
+            return self.actor(pixels).sample()
+    
     
 # Help from https://github.com/juliusfrost/dreamer-pytorch/blob/main/dreamer/algos/dreamer_algo.py for finding returns
 # http://www.incompleteideas.net/book/RLbook2020.pdf
@@ -152,13 +159,17 @@ class Dreamer(nn.Module):
 
 
 class DenseConnections(nn.Module):
-    def __init__(self, input_dims : int, output_dims : int, mid_dims :int = 300, action_model = False):
+    def __init__(self, 
+                 input_dims : int, 
+                 output_dims : int, 
+                 mid_dims :int = 300, 
+                 predict_std : bool = False):
         super(DenseConnections, self).__init__()
         self.l1 = nn.Linear(input_dims, mid_dims)
         self.l2 = nn.Linear(mid_dims, mid_dims)
-        self.action_model = action_model
 
-        if self.action_model:
+        self.predict_std = predict_std
+        if self.predict_std:
             self.std = nn.Linear(mid_dims, output_dims)
             self.mean = nn.Linear(mid_dims, output_dims)
         else:
@@ -168,14 +179,13 @@ class DenseConnections(nn.Module):
     def forward(self, input : torch.Tensor):
         x = nn.ELU(self.l1(input))
         x = nn.ELU(self.l2(x))
-        if self.action_model:
-            std = self.std(x)
+        if self.predict_std:
             mean = self.mean(x)
-
-            eps = torch.randn_like(std)
-
-            x = nn.Tanh(mean + std * eps)
+            std = self.std(x)
+            cov_mat = torch.diagonal(std)
+            return MultivariateNormal(mean, cov_mat)
         else:
             x = self.l3(x)
 
         return x
+    
