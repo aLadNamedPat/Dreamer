@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class RSSM(nn.Module):
-    def __init__(self, state_dim, action_dim, observation_dim, hidden_dim, latent_dim):
+    def __init__(self, latent_dim, action_dim, observation_dim, hidden_dim):
         super(RSSM, self).__init__()
         
         self.latent_dim = latent_dim
@@ -13,14 +13,14 @@ class RSSM(nn.Module):
         
         # Representation model pθ(st | st-1, at-1, ot)
         self.representation_model = nn.Sequential(
-            nn.Linear(state_dim + action_dim + observation_dim, hidden_dim),
+            nn.Linear(latent_dim + action_dim + observation_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, 2 * latent_dim),
         )
         
         # Transition model qθ(st | st-1, at-1)
         self.transition_model = nn.Sequential(
-            nn.Linear(state_dim + action_dim, hidden_dim),
+            nn.Linear(latent_dim + action_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, 2 * latent_dim),
         )
@@ -50,7 +50,9 @@ class RSSM(nn.Module):
     
     def forward(self, prev_state, prev_action, observation):
         mean, std = self.representation(prev_state, prev_action, observation)
-        latent_state = torch.distributions.MultivariateNormal(mean, torch.diag_embed(std)).rsample()
+        std = F.softplus(std)  # Ensure std is positive
+        cov_matrix = torch.diag_embed(std**2)
+        latent_state = torch.distributions.MultivariateNormal(mean, cov_matrix).rsample()
         belief = self.rnn(torch.cat([latent_state, prev_action], dim=-1), prev_state)
         
         return {
