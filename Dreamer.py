@@ -97,11 +97,50 @@ class Dreamer(nn.Module):
 
     # Will return new trajectories of states and actions that will be used to train our model
 
-    def model_update(
-        self,
-        ):
-        # Need to update the model so that a) it learns what the world model is, b) it learns the transition states, c) it learns the reward values from the states
+    def model_update(self):
+        self.RSSM_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
+        
+        # Sample a batch of experiences from the replay buffer
+        states, actions, rewards_real, next_states, dones = self.replayBuffer.sample(self.batch_size, self.sample_steps, random_flag=True)
+        
+        # Get the initial state and latent space
+        prev_state = torch.zeros((self.batch_size, self.RSSM.state_dim))
+        prev_latent_space = torch.zeros((self.batch_size, self.RSSM.latent_dim))
+        
+        # Forward pass through the RSSM
+        latent_spaces, prior_states, prior_means, prior_std_devs, \
+        posterior_states, posterior_means, posterior_std_devs, \
+        decoded_observations, rewards = self.RSSM(
+            prev_state, 
+            actions, 
+            prev_latent_space, 
+            nonterminals=1-dones, 
+            observations=states
+        )
+    
+        
+        # Calculate the MSE loss for observation and decoded observation
+        mse_loss = nn.MSELoss()
+        observation_loss = mse_loss(states, decoded_observations)
+        
+        # Calculate the KL divergence loss between the prior and posterior distributions
+        kl_loss = torch.distributions.kl_divergence(
+            torch.distributions.Normal(posterior_means, posterior_std_devs),
+            torch.distributions.Normal(prior_means, prior_std_devs)
+        ).mean()
+        
 
+        # TO DO: Calculate the following properly!!!!
+        # Calculate the reward loss
+        reward_loss = mse_loss(rewards_real, rewards)
+        
+        # Total loss
+        total_loss = observation_loss + kl_loss + reward_loss
+        
+        # Backpropagation and optimization
+        self.RSSM_optimizer.zero_grad()
+        total_loss.backward()
+        self.RSSM_optimizer.step()
         
 
     # The agent is only training on the imagined states. All compute trajectories are imagined.
