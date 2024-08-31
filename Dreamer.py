@@ -13,8 +13,6 @@ class Dreamer(nn.Module):
             env,
             state_dims : int,
             latent_dims : int,
-            output_dims : int, 
-            action_space : int,
             observation_dim : int,
             o_feature_dim : int,
             reward_dim : int,
@@ -22,7 +20,7 @@ class Dreamer(nn.Module):
             lambda_ : float = 0.95,
             batch_size : int = 50,
             batch_train_freq : int = 50,
-            buffer_size : int = 1e8,
+            buffer_size : int = 100000000,
             sample_steps : int = 1000,
             ):
         super(Dreamer, self).__init__()
@@ -31,8 +29,6 @@ class Dreamer(nn.Module):
         self.action_space = env.action_spec()
         self.state_dims = state_dims
         self.latent_dims = latent_dims
-        self.output_dims = output_dims
-        self.action_space = action_space
         self.observation_dim = observation_dim
         self.o_feature_dim = o_feature_dim
         self.reward_dim = reward_dim
@@ -42,13 +38,11 @@ class Dreamer(nn.Module):
         self.batch_train_freq = batch_train_freq
         self.replayBuffer = Buffer(buffer_size)
         self.sample_steps = sample_steps
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=8e-5)
 
         # Actor needs to output the action to take at a standard deviation
         self.actor = DenseConnections(
             self.state_dims + self.latent_dims,
-            action_space,
+            self.action_space.shape[0],
             action_model = True
         )
 
@@ -68,6 +62,9 @@ class Dreamer(nn.Module):
             latent_dim=self.latent_dims,
             reward_dim=self.reward_dim
         )
+
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=8e-5)
 
     # Sparkly fun things going on here
     def latent_imagine(self, latents, posterior, horizon : int):
@@ -197,11 +194,24 @@ class Dreamer(nn.Module):
             t += 1
             self.num_timesteps += 1
             done = False
-            action = self.sample_action(self.last_obs.to(device))
+            action = self.sample_action(torch.cat([self.prev_state, self.prev_latent_space]))
             timestep = self.env.step(action)
             obs = torch.tensor(self.env.physics.render(camera_id=0, height=120, width=160))
             if (t == self.batch_train_freq):
                 done = True
+            latent_spaces, prior_states, prior_means, prior_std_devs, \
+            posterior_states, posterior_means, posterior_std_devs, \
+            decoded_observations, rewards = self.RSSM(
+                self.prev_state, 
+                action, 
+                self.prev_latent_space, 
+                nonterminals=1-done, 
+                observations=obs
+            )
+
+            self.prev_state = posterior_states
+            self.latent_space = latent_spaces
+
             self.replayBuffer.add((self.last_obs, action, timestep.reward, obs, done))
             self.last_obs = obs
 
@@ -215,6 +225,9 @@ class Dreamer(nn.Module):
         self.data_length = data_length
         obs = self.env.reset()
         self.last_obs = torch.tensor(self.env.physics.render(camera_id=0, height=120, width=160)).to(device)
+        self.prev_state = torch.zeros((self.batch_size, self.RSSM.state_dim))
+        self.prev_latent_space = torch.zeros((self.batch_size, self.RSSM.latent_dim))
+
         self.num_timesteps = 0
         while (self.num_timesteps < timesteps):
             self.rollout()
