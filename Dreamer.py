@@ -45,7 +45,7 @@ class Dreamer(nn.Module):
         # Actor needs to output the action to take at a standard deviation
         self.actor = DenseConnections(
             self.state_dims + self.latent_dims,
-            self.action_space.shape[0],
+            self.action_space,
             action_model = True
         )
 
@@ -59,7 +59,7 @@ class Dreamer(nn.Module):
         # def __init__(self, state_dim, action_dim, observation_dim, o_feature_dim, latent_dim, reward_dim):
         self.RSSM = RSSM(
             state_dim=self.state_dims,
-            action_dim=self.action_space.shape[0],
+            action_dim=self.action_space,
             observation_dim=self.observation_dim,
             o_feature_dim=self.o_feature_dim,
             latent_dim=self.latent_dims,
