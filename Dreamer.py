@@ -6,7 +6,7 @@ from RSSM import RSSM
 from torch.distributions.multivariate_normal import MultivariateNormal
 import wandb
 
-# device = torch.device("cuda")
+device = torch.device("cuda")
 
 class Dreamer(nn.Module):
     def __init__(
@@ -57,15 +57,12 @@ class Dreamer(nn.Module):
         # def __init__(self, state_dim, action_dim, observation_dim, o_feature_dim, latent_dim, reward_dim):
         self.RSSM = RSSM(
             state_dim=self.state_dims,
-            action_dim=self.action_space,
+            action_dim=self.action_space.shape[0],
             observation_dim=self.observation_dim,
             o_feature_dim=self.o_feature_dim,
             latent_dim=self.latent_dims,
             reward_dim=self.reward_dim
         )
-        
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=8e-5)
 
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=8e-5)
