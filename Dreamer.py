@@ -147,14 +147,14 @@ class Dreamer(nn.Module):
         self.RSSM_optimizer.step()
         
         # Log losses to wandb
-        wandb.log({
-            "observation_loss": observation_loss.item(),
-            "kl_loss": kl_loss.item(),
-            "reward_loss": reward_loss.item(),
-            "total_loss": total_loss.item()
-        })
+        # wandb.log({
+        #     "observation_loss": observation_loss.item(),
+        #     "kl_loss": kl_loss.item(),
+        #     "reward_loss": reward_loss.item(),
+        #     "total_loss": total_loss.item()
+        # })
         
-        return beliefs, states, actions
+        return beliefs, states, actions, reward_loss, kl_loss, observation_loss
 
 
     # The agent is only training on the imagined states. All compute trajectories are imagined.
@@ -191,10 +191,10 @@ class Dreamer(nn.Module):
         self.critic_optimizer.step()
 
         # Log losses to wandb
-        wandb.log({
-            "actor_loss": actor_loss.item(),
-            "critic_loss": critic_loss.item()
-        })
+        # wandb.log({
+        #     "actor_loss": actor_loss.item(),
+        #     "critic_loss": critic_loss.item()
+        # })
 
         # Use Log_prob as loss instead of MSE
         # Actor loss is the negative of the predicted returns
@@ -239,6 +239,7 @@ class Dreamer(nn.Module):
         timesteps : int,
         num_points : int,
         data_length : int,
+        update_steps : int = 100,
     ):
         self.num_points = num_points
         self.data_length = data_length
@@ -247,26 +248,31 @@ class Dreamer(nn.Module):
         self.last_obs = torch.tensor(render.copy()).to(device)
         self.prev_state = torch.zeros((self.RSSM.state_dim))
         self.prev_latent_space = torch.zeros((self.RSSM.latent_dim))
-
         self.num_timesteps = 0
+
         while (self.num_timesteps < timesteps):
             # wandb.init(project="dreamer_training", reinit=True)
             self.rollout()
-            beliefs, states = self.model_update()
-            # The data that the agent update receives should be the encoded space already to save memory
-            actor_loss, critic_loss = self.agent_update(beliefs, states)
+            for i in range(update_steps):
+                beliefs, states, actions, reward_loss, kl_loss, decoder_loss = self.model_update()
+                # The data that the agent update receives should be the encoded space already to save memory
+                actor_loss, critic_loss = self.agent_update(beliefs, states)
+                # Log training progress to wandb
+                wandb.log({
+                    "num_timesteps": self.num_timesteps,
+                    "actor_loss": actor_loss.item(),
+                    "critic_loss": critic_loss.item(),
+                    "reward_loss" : reward_loss,
+                    "observation_loss" : decoder_loss,
+                    "kl_loss" : kl_loss.item()
+                })
+
             obs = self.env.reset()
             render = self.env.physics.render(camera_id=0, height=120, width=160)
             self.last_obs = torch.tensor(render.copy()).to(device)
             self.prev_state = torch.zeros((self.batch_size, self.RSSM.state_dim))
             self.prev_latent_space = torch.zeros((self.batch_size, self.RSSM.latent_dim))
 
-            # Log training progress to wandb
-            wandb.log({
-                "num_timesteps": self.num_timesteps,
-                "actor_loss": actor_loss.item(),
-                "critic_loss": critic_loss.item()
-            })
 
         return
     
