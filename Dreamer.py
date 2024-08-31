@@ -6,7 +6,7 @@ from RSSM import RSSM
 from torch.distributions.multivariate_normal import MultivariateNormal
 import wandb
 
-# device = torch.device("cuda")
+device = torch.device("cpu")
 
 class Dreamer(nn.Module):
     def __init__(

@@ -16,8 +16,6 @@ if __name__ == '__main__':
         env=env,
         state_dims=config['dreamer']['state_dims'],
         latent_dims=config['dreamer']['latent_dims'],
-        output_dims=config['dreamer']['output_dims'],
-        action_space=env.action_spec().shape[0],
         observation_dim=tuple(config['dreamer']['observation_dim']),
         o_feature_dim=config['dreamer']['o_feature_dim'],
         reward_dim=config['dreamer']['reward_dim'],
