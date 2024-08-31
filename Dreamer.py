@@ -70,7 +70,7 @@ class Dreamer(nn.Module):
 
     def model_update(self):
         # Sample a batch of experiences from the replay buffer
-        states, actions, rewards, next_states, dones = self.replayBuffer.sample(self.batch_size, self.sample_steps, random_flag=True)
+        states, actions, rewards_real, next_states, dones = self.replayBuffer.sample(self.batch_size, self.sample_steps, random_flag=True)
         
         # Get the initial state and latent space
         prev_state = torch.zeros((self.batch_size, self.RSSM.state_dim))
@@ -101,15 +101,15 @@ class Dreamer(nn.Module):
 
         # TO DO: Calculate the following properly!!!!
         # Calculate the reward loss
-        # reward_loss = mse_loss(rewards, rewards)
+        reward_loss = mse_loss(rewards_real, rewards)
         
         # Total loss
-        # total_loss = observation_loss + kl_loss + reward_loss
+        total_loss = observation_loss + kl_loss + reward_loss
         
-        # # Backpropagation and optimization
-        # self.RSSM_optimizer.zero_grad()
-        # total_loss.backward()
-        # self.RSSM_optimizer.step()
+        # Backpropagation and optimization
+        self.RSSM_optimizer.zero_grad()
+        total_loss.backward()
+        self.RSSM_optimizer.step()
         
 
     # The agent is only training on the imagined states. All compute trajectories are imagined.
