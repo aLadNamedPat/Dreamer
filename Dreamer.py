@@ -109,18 +109,19 @@ class Dreamer(nn.Module):
 
         # Sample a batch of experiences from the replay buffer
         states, actions, rewards_real, next_states, dones = self.replayBuffer.sample(self.batch_size, self.sample_steps, random_flag=True)
-        
+        dones = dones.reshape(dones.shape[0], 1)
         # Get the initial state and latent space
         prev_state = torch.zeros((self.batch_size, self.RSSM.state_dim))
         prev_latent_space = torch.zeros((self.batch_size, self.RSSM.latent_dim))
         
         # Forward pass through the RSSM
+        print(f"Dones: {dones}")
         latent_spaces, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs, decoded_observations, rewards = self.RSSM(
             prev_state, 
             actions, 
             prev_latent_space, 
-            nonterminals=1-dones, 
-            observations=states
+            nonterminals=torch.logical_not(dones), 
+            observation=states
         )
         
         # Calculate the MSE loss for observation and decoded observation
@@ -208,9 +209,14 @@ class Dreamer(nn.Module):
             self.num_timesteps += 1
             done = False
             action = self.sample_action(torch.cat([self.prev_state, self.prev_latent_space]))
-            print(f"First Action: {action}")
+            action = torch.tensor(action, dtype=torch.float32)
+            print(f"Action : {action}")
+            if action.dim() == 1:
+                action = action.reshape(1, action.shape[0])
+            print("Action shape: ", action.shape)
             timestep = self.env.step(action)
             obs = torch.tensor(self.env.physics.render(camera_id=0, height=120, width=160).copy())
+            obs = obs.reshape(1, obs.shape[0], obs.shape[1], obs.shape[2])
             if (t == self.batch_train_freq - 1):
                 done = True
             
@@ -231,7 +237,7 @@ class Dreamer(nn.Module):
             self.prev_state = posterior_states
             self.prev_latent_space = latent_spaces
 
-            self.replayBuffer.add((self.last_obs, action, timestep.reward, obs, done))
+            self.replayBuffer.add(self.last_obs, action, timestep.reward, obs, done)
             self.last_obs = obs
 
     def train(
@@ -245,8 +251,8 @@ class Dreamer(nn.Module):
         obs = self.env.reset()
         render = self.env.physics.render(camera_id=0, height=120, width=160)
         self.last_obs = torch.tensor(render.copy()).to(device)
-        self.prev_state = torch.zeros((self.RSSM.state_dim))
-        self.prev_latent_space = torch.zeros((self.RSSM.latent_dim))
+        self.prev_state = torch.zeros((1, self.RSSM.state_dim))
+        self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim))
 
         self.num_timesteps = 0
         while (self.num_timesteps < timesteps):
@@ -258,8 +264,8 @@ class Dreamer(nn.Module):
             obs = self.env.reset()
             render = self.env.physics.render(camera_id=0, height=120, width=160)
             self.last_obs = torch.tensor(render.copy()).to(device)
-            self.prev_state = torch.zeros((self.batch_size, self.RSSM.state_dim))
-            self.prev_latent_space = torch.zeros((self.batch_size, self.RSSM.latent_dim))
+            self.prev_state = torch.zeros((1, self.RSSM.state_dim))
+            self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim))
 
             # Log training progress to wandb
             wandb.log({

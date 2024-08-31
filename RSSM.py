@@ -24,8 +24,6 @@ class RSSM(nn.Module):
         
         self.reward_model = RewardModel(latent_dim, state_dim, reward_dim)
         action_dim = action_dim.shape[0]
-        print("Action dimension: ", action_dim)
-        print("State dimension: ", state_dim)
         self.transition_pre = nn.Linear(state_dim + action_dim, latent_dim)
         self.transition_post = nn.Linear(latent_dim, 2 * state_dim)
         
@@ -44,27 +42,29 @@ class RSSM(nn.Module):
         else:
             state = posterior_state
 
-        if nonterminals:
-            state = state * nonterminals 
+        if nonterminals is not None:
+            state = state * nonterminals
             
-        latent_space = self.rnn(state, latent_space)
-        action = torch.tensor(action, dtype=torch.float32)
+        latent_space = self.rnn(state.view(-1, state.size(-1)), latent_space.view(-1, latent_space.size(-1)))
         
         ## TODO : Do we need to reduce the size of the state
-        print("State: ", state)
-        print("Action: ", action)
+        
         # state = state.view(-1)
         hidden = self.relu(self.transition_pre(torch.cat([state, action], dim = -1)))
-        prior_mean, _prior_std_dev = torch.chunk(self.transition_post(hidden), 2, dim = 1)
+        prior_mean, _prior_std_dev = torch.chunk(self.transition_post(hidden), 2, dim = -1)
         prior_std_dev = F.softplus(_prior_std_dev)
         cov_matrix = torch.diag_embed(prior_std_dev**2)
         sampled_state = torch.distributions.MultivariateNormal(prior_mean, cov_matrix).rsample()
         prior_state = sampled_state
 
         if observation is not None:
+            observation = observation.float()
+            print(f"Observation Shape: {observation.shape}")
             encoded_observation = self.encoder(observation)
-            hidden = self.relu(self.representation_pre(torch.cat([latent_space, encoded_observation], dim=1)))
-            posterior_mean, _posterior_std_dev = torch.chunk(self.representation_post(hidden), 2, dim=1)
+            print(f"Latent Space Shape: {latent_space.shape}")
+            print(f"Encoded Observation Shape: {encoded_observation.shape}")
+            hidden = self.relu(self.representation_pre(torch.cat([latent_space, encoded_observation], dim=-1)))
+            posterior_mean, _posterior_std_dev = torch.chunk(self.representation_post(hidden), 2, dim=-1)
             posterior_std_dev = F.softplus(_posterior_std_dev)
             cov_matrix = torch.diag_embed(posterior_std_dev**2)
             sampled_state = torch.distributions.MultivariateNormal(posterior_mean, cov_matrix).rsample()
@@ -73,7 +73,7 @@ class RSSM(nn.Module):
         reward = self.reward_model(latent_space, sampled_state)
         
         states = [latent_space, prior_state, prior_mean, prior_std_dev]
-        if observation:
+        if observation is not None:
             states += [posterior_state, posterior_mean, posterior_std_dev]
             decoded_observation = self.decoder(posterior_state)
             states.append(decoded_observation)
@@ -92,7 +92,7 @@ class RewardModel(nn.Module):
         self.fw3 = nn.Linear(hidden_dim, 1)
     
     def forward(self, latent_space, sampled_state):
-        x = torch.cat([latent_space, sampled_state], dim=1)
+        x = torch.cat([latent_space, sampled_state], dim=-1)
         x = self.relu(self.fw1(x))
         x = self.relu(self.fw2(x))
         reward = self.fw3(x)

@@ -8,7 +8,7 @@ class ConvEncoder(nn.Module):
         self.relu = nn.ReLU()
         
         ## We choose an enc of input channels -> 32 -> 64 -> 128 -> 256
-        print("input chanells: ", input_channels)
+        print("input channels: ", input_channels)
         self.conv32 = nn.Conv2d(input_channels, 32, kernel_size=4, stride=2, padding=1)
         self.bn1 = nn.BatchNorm2d(32)
         self.conv64 = nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1)
@@ -17,18 +17,23 @@ class ConvEncoder(nn.Module):
         self.bn3 = nn.BatchNorm2d(128)
         self.conv256 = nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1)
         self.bn4 = nn.BatchNorm2d(256)
-        self.fc = nn.Linear(256 * 4 * 4, feature_dim)
+        self.fc = nn.Linear(256 * 7 * 10, feature_dim)  
 
     def forward(self, input):
+        print(f"Conv Input {input}")
+        print(f"Input shape: {input.shape}")
+        input = input.permute(0, 3, 1, 2)  
         x = self.relu(self.bn1(self.conv32(input)))
         x = self.relu(self.bn2(self.conv64(x)))
         x = self.relu(self.bn3(self.conv128(x)))
         x = self.relu(self.bn4(self.conv256(x)))
         ## Change dim to feature vector
-        x = x.view(x.shape[0], -1)
+        print(f"X Shape {x.shape}")
+        
+        x = x.reshape(x.size(0), -1)  
         x = self.fc(x)
         return x
-
+    
 class ConvDecoder(nn.Module):
     def __init__(self, feature_dim, output_channels):
         super(ConvDecoder, self).__init__()
@@ -49,9 +54,10 @@ class ConvDecoder(nn.Module):
 
     def forward(self, x):
         x = self.fc(x)
-        x = x.view(x.shape[0], 256, 4, 4)
+        x = x.reshape(x.size(0), 256, 4, 4)
         x = self.relu(self.bn1(self.deconv256(x)))
         x = self.relu(self.bn2(self.deconv128(x)))
         x = self.relu(self.bn3(self.deconv64(x)))
         x = self.sigmoid(self.deconv32(x))
+        x = x.permute(0, 2, 3, 1)
         return x
