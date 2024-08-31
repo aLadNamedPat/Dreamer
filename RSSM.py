@@ -18,12 +18,14 @@ class RSSM(nn.Module):
         self.state_dim = state_dim
         self.latent_dim = latent_dim
 
-        self.encoder = ConvEncoder(observation_dim, o_feature_dim)
-        self.decoder = ConvDecoder(latent_dim, observation_dim)
+        self.encoder = ConvEncoder(3, o_feature_dim)
+        self.decoder = ConvDecoder(latent_dim, 3)
         self.rnn = nn.GRUCell(input_size=latent_dim, hidden_size=latent_dim)
         
         self.reward_model = RewardModel(latent_dim, state_dim, reward_dim)
-        
+        action_dim = action_dim.shape[0]
+        print("Action dimension: ", action_dim)
+        print("State dimension: ", state_dim)
         self.transition_pre = nn.Linear(state_dim + action_dim, latent_dim)
         self.transition_post = nn.Linear(latent_dim, 2 * state_dim)
         
