@@ -134,7 +134,7 @@ class Dreamer(nn.Module):
         ).mean()
 
         beliefs, states, actions = self.latent_imagine(prev_state, posterior_means, 15)
-        # TO DO: Calculate the following properly!!!!
+        ## TODO: Calculate the following properly!!!!
         # Calculate the reward loss
         reward_loss = mse_loss(rewards_real, rewards)
         
