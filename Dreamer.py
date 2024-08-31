@@ -4,8 +4,9 @@ import numpy as np
 from ReplayBuffer import Buffer 
 from RSSM import RSSM
 from torch.distributions.multivariate_normal import MultivariateNormal
+import wandb
 
-device = torch.device("cuda")
+# device = torch.device("cuda")
 
 class Dreamer(nn.Module):
     def __init__(
@@ -62,6 +63,9 @@ class Dreamer(nn.Module):
             latent_dim=self.latent_dims,
             reward_dim=self.reward_dim
         )
+        
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=8e-5)
 
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=8e-5)
@@ -145,6 +149,14 @@ class Dreamer(nn.Module):
         total_loss.backward()
         self.RSSM_optimizer.step()
         
+        # Log losses to wandb
+        wandb.log({
+            "observation_loss": observation_loss.item(),
+            "kl_loss": kl_loss.item(),
+            "reward_loss": reward_loss.item(),
+            "total_loss": total_loss.item()
+        })
+        
         return beliefs, states, actions
 
 
@@ -180,6 +192,12 @@ class Dreamer(nn.Module):
         critic_loss = -torch.mean(values.log_prob(returns))# For value loss (critic loss), we want to find the log probability of finding that returns for the given value predicted
         critic_loss.backwards()
         self.critic_optimizer.step()
+
+        # Log losses to wandb
+        wandb.log({
+            "actor_loss": actor_loss.item(),
+            "critic_loss": critic_loss.item()
+        })
 
         # Use Log_prob as loss instead of MSE
         # Actor loss is the negative of the predicted returns
@@ -230,11 +248,19 @@ class Dreamer(nn.Module):
 
         self.num_timesteps = 0
         while (self.num_timesteps < timesteps):
+            # wandb.init(project="dreamer_training", reinit=True)
             self.rollout()
             beliefs, states = self.model_update()
             # The data that the agent update receives should be the encoded space already to save memory
-            self.agent_update(beliefs, states)
+            actor_loss, critic_loss = self.agent_update(beliefs, states)
             obs = self.env.reset()
+
+            # Log training progress to wandb
+            wandb.log({
+                "num_timesteps": self.num_timesteps,
+                "actor_loss": actor_loss.item(),
+                "critic_loss": critic_loss.item()
+            })
 
         return
     
