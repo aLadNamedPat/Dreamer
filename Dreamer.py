@@ -11,7 +11,8 @@ class Dreamer(nn.Module):
     def __init__(
             self,
             env,
-            latent_dims : int,
+            state_dims : int,
+            belief_dims : int,
             output_dims : int, 
             action_space : int,
             gamma : float  = 0.99,
@@ -25,7 +26,8 @@ class Dreamer(nn.Module):
         
         self.env = env
         self.action_space = env.action_spec()
-        self.latent_dims = latent_dims
+        self.state_dims = state_dims
+        self.belief_dims = belief_dims
         self.output_dims = output_dims
         self.action_space = action_space
         self.gamma = gamma
@@ -34,18 +36,17 @@ class Dreamer(nn.Module):
         self.batch_train_freq = batch_train_freq
         self.replayBuffer = Buffer(buffer_size)
         self.sample_steps = sample_steps
-        self.latent_dims = latent_dims
 
         # Actor needs to output the action to take at a standard deviation
         self.actor = DenseConnections(
-            self.latent_dims,
+            self.state_dims + self.belief_dims,
             action_space * 2,
             action_model = True
         )
 
         # Critic only needs to output the value of being at a certain latent dim (no sampling required)
         self.critic = DenseConnections(
-            self.latent_dims,
+            self.state_dims + self.belief_dims,
             1,
             action_model = False
         )
@@ -59,20 +60,48 @@ class Dreamer(nn.Module):
 
 
     # Sparkly fun things going on here
-    def imagine(self, datapoints, horizon : int):
-    # datapoints is a N by M vector (where N is the number of trajectories sampled and M is the length of trajectory)
-        imagined_trajs = []
-        for datapoint in datapoints:
-            imagined_traj = []
-            for i in range(horizon):
-                imagined_traj.append()
+    def latent_imagine(self, beliefs, posterior, horizon : int):
+    # Latent imagination receives the beliefs and the posterior where the beliefs are the probability distribution over possible events whereas the posterior is the deterministic
+
+    # Posterior is a M x N vector representing the state at each different index
+    # Belief is a M x N vector representing the belief at each different index
+        x, y = posterior.shape
+
+        imagined_state = posterior.reshape(x * y, -1)
+        imagined_belief = beliefs.reshape(x * y, -1)
+
+        # Action needs to change tommorrow because it shouldn't be stored as an actual value (?)
+        action_mean, action_std = torch.chunk(self.actor(torch.cat([imagined_state, imagined_belief]).to(device=device)), 2)
+        action = action_mean + action_std * torch.randn_like(action_mean)
+
+        belief_list = [imagined_belief]
+        state_list = [imagined_state]
+        action_list = [action]
+
+        for j in range(horizon):
+            state = self.RSSM(imagined_state, action, imagined_belief)
+            imagined_state, imagined_belief = state[0], state[1]
+            action_mean, action_std = torch.chunk(self.actor(torch.cat([imagined_state, imagined_belief]).to(device=device)), 2)
+            action = action_mean + action_std * torch.randn_like(action_mean)
+
+            belief_list.append(imagined_belief)
+            state_list.append(imagined_state)
+            action_list.append(action_list)
+
+        
+        belief_list = torch.stack(belief_list, dim = 0).to(device = device)
+        state_list = torch.stack(state_list, dim = 0).to(device = device)
+        action_list = torch.stack(action_list, dim = 0).to(device = device)
+
+        return belief_list, state_list, action_list
+
     # Will return new trajectories of states and actions that will be used to train our model
 
     def model_update(
         self,
         ):
         # Need to update the model so that a) it learns what the world model is, b) it learns the transition states, c) it learns the reward values from the states
-        pass
+
         
 
     # The agent is only training on the imagined states. All compute trajectories are imagined.
