@@ -15,6 +15,9 @@ class Dreamer(nn.Module):
             latent_dims : int,
             output_dims : int, 
             action_space : int,
+            observation_dim : int,
+            o_feature_dim : int,
+            reward_dim : int,
             gamma : float  = 0.99,
             lambda_ : float = 0.95,
             batch_size : int = 50,
@@ -30,6 +33,9 @@ class Dreamer(nn.Module):
         self.latent_dims = latent_dims
         self.output_dims = output_dims
         self.action_space = action_space
+        self.observation_dim = observation_dim
+        self.o_feature_dim = o_feature_dim
+        self.reward_dim = reward_dim
         self.gamma = gamma
         self.lambda_ = lambda_
         self.batch_size = batch_size
@@ -55,9 +61,12 @@ class Dreamer(nn.Module):
 
         # def __init__(self, state_dim, action_dim, observation_dim, o_feature_dim, latent_dim, reward_dim):
         self.RSSM = RSSM(
-            input_dims, 
-            action_space,
-
+            state_dim=self.state_dims,
+            action_dim=self.action_space,
+            observation_dim=self.observation_dim,
+            o_feature_dim=self.o_feature_dim,
+            latent_dim=self.latent_dims,
+            reward_dim=self.reward_dim
         )
 
     # Sparkly fun things going on here
