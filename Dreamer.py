@@ -12,7 +12,7 @@ class Dreamer(nn.Module):
             self,
             env,
             state_dims : int,
-            belief_dims : int,
+            latent_dims : int,
             output_dims : int, 
             action_space : int,
             gamma : float  = 0.99,
@@ -27,7 +27,7 @@ class Dreamer(nn.Module):
         self.env = env
         self.action_space = env.action_spec()
         self.state_dims = state_dims
-        self.belief_dims = belief_dims
+        self.latent_dims = latent_dims
         self.output_dims = output_dims
         self.action_space = action_space
         self.gamma = gamma
@@ -39,18 +39,19 @@ class Dreamer(nn.Module):
 
         # Actor needs to output the action to take at a standard deviation
         self.actor = DenseConnections(
-            self.state_dims + self.belief_dims,
+            self.state_dims + self.latent_dims,
             action_space * 2,
             action_model = True
         )
 
         # Critic only needs to output the value of being at a certain latent dim (no sampling required)
         self.critic = DenseConnections(
-            self.state_dims + self.belief_dims,
+            self.state_dims + self.latent_dims,
             1,
             action_model = False
         )
 
+        # def __init__(self, state_dim, action_dim, observation_dim, o_feature_dim, latent_dim, reward_dim):
         self.RSSM = RSSM(
             input_dims, 
             action_space,
@@ -60,46 +61,46 @@ class Dreamer(nn.Module):
 
 
     # Sparkly fun things going on here
-    def latent_imagine(self, beliefs, posterior, horizon : int):
-    # Latent imagination receives the beliefs and the posterior where the beliefs are the probability distribution over possible events whereas the posterior is the deterministic
+    def latent_imagine(self, latents, posterior, horizon : int):
+    # Latent imagination receives the latents and the posterior where the latents are the probability distribution over possible events whereas the posterior is the deterministic
 
     # Posterior is a M x N vector representing the state at each different index
-    # Belief is a M x N vector representing the belief at each different index
+    # Latent is a M x N vector representing the latent at each different index
         x, y = posterior.shape
 
         imagined_state = posterior.reshape(x * y, -1)
-        imagined_belief = beliefs.reshape(x * y, -1)
+        imagined_latent = latents.reshape(x * y, -1)
 
         # Action needs to change tommorrow because it shouldn't be stored as an actual value (?)
-        action_mean, action_std = torch.chunk(self.actor(torch.cat([imagined_state, imagined_belief]).to(device=device)), 2)
+        action_mean, action_std = torch.chunk(self.actor(torch.cat([imagined_state, imagined_latent]).to(device=device)), 2)
         action = action_mean + action_std * torch.randn_like(action_mean)
 
-        belief_list = [imagined_belief]
+        latent_list = [imagined_latent]
         state_list = [imagined_state]
         action_list = [action]
 
         for j in range(horizon):
-            state = self.RSSM(imagined_state, action, imagined_belief)
-            imagined_state, imagined_belief = state[0], state[1]
-            action_mean, action_std = torch.chunk(self.actor(torch.cat([imagined_state, imagined_belief]).to(device=device)), 2)
+            state = self.RSSM(imagined_state, action, imagined_latent)
+            imagined_state, imagined_latent = state[0], state[1]
+            action_mean, action_std = torch.chunk(self.actor(torch.cat([imagined_state, imagined_latent]).to(device=device)), 2)
             action = action_mean + action_std * torch.randn_like(action_mean)
 
-            belief_list.append(imagined_belief)
+            latent_list.append(imagined_latent)
             state_list.append(imagined_state)
             action_list.append(action_list)
 
         
-        belief_list = torch.stack(belief_list, dim = 0).to(device = device)
+        latent_list = torch.stack(latent_list, dim = 0).to(device = device)
         state_list = torch.stack(state_list, dim = 0).to(device = device)
         action_list = torch.stack(action_list, dim = 0).to(device = device)
 
-        return belief_list, state_list, action_list
+        return latent_list, state_list, action_list
 
     # Will return new trajectories of states and actions that will be used to train our model
 
     def model_update(self):
         self.RSSM_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
-        
+
         # Sample a batch of experiences from the replay buffer
         states, actions, rewards_real, next_states, dones = self.replayBuffer.sample(self.batch_size, self.sample_steps, random_flag=True)
         
