@@ -11,7 +11,7 @@ class Dreamer(nn.Module):
     def __init__(
             self,
             env,
-            input_dims : int,
+            latent_dims : int,
             output_dims : int, 
             action_space : int,
             gamma : float  = 0.99,
@@ -22,15 +22,10 @@ class Dreamer(nn.Module):
             sample_steps : int = 1000,
             ):
         super(Dreamer, self).__init__()
-
-        self.world_model = nn.Sequential(
-            # Fill in something here for a model the Sequential is just a stand-in
-        )
-
         
         self.env = env
-        self.action_space = env.action_space
-        self.input_dims = input_dims
+        self.action_space = env.action_spec()
+        self.latent_dims = latent_dims
         self.output_dims = output_dims
         self.action_space = action_space
         self.gamma = gamma
@@ -38,40 +33,59 @@ class Dreamer(nn.Module):
         self.batch_size = batch_size
         self.batch_train_freq = batch_train_freq
         self.replayBuffer = Buffer(buffer_size)
+        self.sample_steps = sample_steps
+        self.latent_dims = latent_dims
 
+        # Actor needs to output the action to take at a standard deviation
         self.actor = DenseConnections(
-            input_dims,
-            action_space,
+            self.latent_dims + self.action_space,
+            action_space * 2,
             action_model = True
         )
 
+        # Critic only needs to output the value of being at a certain latent dim (no sampling required)
         self.critic = DenseConnections(
-            input_dims,
-            output_dims,
+            self.latent_dims,
+            1,
             action_model = False
         )
 
-        # RANDOM REWARD MODEL INCLUDED FOR NOW
-        self.rewards = DenseConnections(
-            input_dims,
-            output_dims,
-            action_model = False
+        self.RSSM = RSSM(
+            input_dims, 
+            action_space,
+
+
         )
 
 
-    def update(
+    def model_update(
+        self,
+    ):
+        # Need to update the model so that a) it learns what the world model is, b) it learns the transition states, c) it learns the reward values from the states
+        pass
+        
+
+    # The agent is only training on the imagined states. All compute trajectories are imagined.
+    def agent_update(
             self,
-            states : torch.Tensor,
+            data_points
             ):
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
-        self.batch_sample = self.replayBuffer.sample()
-        rewards = self.rewards(states)
-        values = self.critic(states)
 
+
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
+        # Generates 50 random datapoints of length 50
+        # This is going to have the reward of each state generated
+        rewards = self.rewards(data_points.reshape(self.num_points * self.data_length, -1))
+        rewards = rewards.reshape(self.num_points, self.data_length, -1)
+        # This is going to have the value of each state generated, we want to flatten because the 
+        values = self.critic(self.batch_sample.reshape(self.num_points * self.data_length, -1))
+        values = values.reshape(self.num_points, self.data_length, -1)
+
+        # This should return the returns for each of the 50 randomly genearted trajectories
         returns = self.find_predicted_returns(
-            rewards[:-1],
-            values[:-1],
-            last_reward = rewards[-1],
+            rewards[:, :-1], # Remember that the batch_sample is two dimensional which means that the rewards and values will be two dimensional
+            values[:, :-1],
+            last_reward = rewards[:, -1],
             _lambda = self.lambda_
         )
 
@@ -81,20 +95,19 @@ class Dreamer(nn.Module):
         self.actor_optimizer.step()
 
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=8e-5)
-        critic_distribution  = self.critic(self.batch_sample)
-
-        critic_loss = -torch.mean(values.log_prob(returns))# For value loss (critic loss), we want to find the log probability of finding that returns for the given value predicte
+        critic_loss = -torch.mean(values.log_prob(returns))# For value loss (critic loss), we want to find the log probability of finding that returns for the given value predicted
+        critic_loss.backwards()
+        self.critic_optimizer.step()
 
         # Use Log_prob as loss instead of MSE
         # Actor loss is the negative of the predicted returns
         # Value loss is the "KL" loss between the predicted value and the actual value 
         return # Return the world model loss, actor loss, critic loss
-    
+
     def rollout(
         self,
     ):
         t = 0
-
         while (t < self.batch_train_freq):
             t += 1
             self.num_timesteps += 1
@@ -107,29 +120,40 @@ class Dreamer(nn.Module):
             self.replayBuffer.add((self._last_obs, action, timestep.reward, obs, done))
             self.last_obs = obs
 
-
     def train(
         self,
-        timesteps : int
+        timesteps : int,
+        num_points : int,
+        data_length : int,
     ):
+        self.num_points = num_points
+        self.data_length = data_length
         obs = self.env.reset()
         self._last_obs = torch.tensor(self.env.physics.render(camera_id=0, height=120, width=160)).to(device)
         self.num_timesteps = 0
         while (self.num_timesteps < timesteps):
             self.rollout()
-            data_points = self.replayBuffer.sample()
-            self.update(data_points)
-        
+            data_points = self.replayBuffer.sample(num_points, data_length, random_flag = False)
+            self.model_update(data_points)
+
+            # The data that the agent update receives should be the encoded space already to save memory
+            data_points_updated = None
+            self.agent_update(data_points_updated)
+
+    ### NEED TO EDIT THIS SO THAT REPRESENTATION MODEL ENCODES THE VALUES
     def sample_action(
         self,
         pixels : torch.Tensor,
+        predict_mode : bool = False
     ) -> torch.Tensor:
         if (self.num_timesteps < self.sample_steps):
             return np.random.uniform(low=-1.0, high=1.0, size=self.env.action_spec().shape)
+        elif not predict_mode:
+            return self.actor(pixels).sample() + 0.3 * torch.randn_like(self.env.action_spec().shape)
         else:
             return self.actor(pixels).sample()
-    
-    
+
+
 # Help from https://github.com/juliusfrost/dreamer-pytorch/blob/main/dreamer/algos/dreamer_algo.py for finding returns
 # http://www.incompleteideas.net/book/RLbook2020.pdf
 
@@ -170,8 +194,7 @@ class DenseConnections(nn.Module):
 
         self.predict_std = predict_std
         if self.predict_std:
-            self.std = nn.Linear(mid_dims, output_dims)
-            self.mean = nn.Linear(mid_dims, output_dims)
+            self.l3 = nn.Linear(mid_dims, 2 * output_dims)
         else:
             self.l3 = nn.Linear(mid_dims, output_dims)
 
@@ -180,12 +203,10 @@ class DenseConnections(nn.Module):
         x = nn.ELU(self.l1(input))
         x = nn.ELU(self.l2(x))
         if self.predict_std:
-            mean = self.mean(x)
-            std = self.std(x)
+            mean, std = torch.chunk(self.l3(x), 2, dim=-1)
             cov_mat = torch.diagonal(std)
             return MultivariateNormal(mean, cov_mat)
         else:
             x = self.l3(x)
 
         return x
-    

@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class RSSM(nn.Module):
     def __init__(self, latent_dim, action_dim, observation_dim, hidden_dim):
         super(RSSM, self).__init__()
@@ -62,3 +63,6 @@ class RSSM(nn.Module):
             'belief': belief,
             'rnn_state': belief,
         }
+    
+    def getModelParams(self):
+        return list(self.rnn.parameters()) + list(self.transition_model.parameters()) + list(self.representation_model.parameters()) + list(self.reward_model.parameters())
