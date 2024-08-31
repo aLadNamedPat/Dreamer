@@ -36,6 +36,8 @@ class Dreamer(nn.Module):
         self.batch_train_freq = batch_train_freq
         self.replayBuffer = Buffer(buffer_size)
         self.sample_steps = sample_steps
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=8e-5)
 
         # Actor needs to output the action to take at a standard deviation
         self.actor = DenseConnections(
@@ -147,8 +149,6 @@ class Dreamer(nn.Module):
             states,
         ):
 
-
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
         # Generates 50 random datapoints of length 50
         # This is going to have the reward of each state generated
         datapoints = torch.cat([beliefs, states], dim = 0)
@@ -171,7 +171,6 @@ class Dreamer(nn.Module):
         actor_loss.backwards()
         self.actor_optimizer.step()
 
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=8e-5)
         critic_loss = -torch.mean(values.log_prob(returns))# For value loss (critic loss), we want to find the log probability of finding that returns for the given value predicted
         critic_loss.backwards()
         self.critic_optimizer.step()
@@ -194,7 +193,7 @@ class Dreamer(nn.Module):
             obs = torch.tensor(self.env.physics.render(camera_id=0, height=120, width=160))
             if (t == self.batch_train_freq):
                 done = True
-            self.replayBuffer.add((self._last_obs, action, timestep.reward, obs, done))
+            self.replayBuffer.add((self.last_obs, action, timestep.reward, obs, done))
             self.last_obs = obs
 
     def train(
@@ -206,15 +205,18 @@ class Dreamer(nn.Module):
         self.num_points = num_points
         self.data_length = data_length
         obs = self.env.reset()
-        self._last_obs = torch.tensor(self.env.physics.render(camera_id=0, height=120, width=160)).to(device)
+        self.last_obs = self.RSSM(torch.tensor(self.env.physics.render(camera_id=0, height=120, width=160)).to(device))[]
         self.num_timesteps = 0
         while (self.num_timesteps < timesteps):
             self.rollout()
             beliefs, states = self.model_update()
             # The data that the agent update receives should be the encoded space already to save memory
             self.agent_update(beliefs, states)
-        
+            obs = self.env.reset()
+
         return
+    
+
     ### NEED TO EDIT THIS SO THAT REPRESENTATION MODEL ENCODES THE VALUES
     def sample_action(
         self,
