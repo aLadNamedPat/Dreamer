@@ -38,7 +38,7 @@ class Dreamer(nn.Module):
 
         # Actor needs to output the action to take at a standard deviation
         self.actor = DenseConnections(
-            self.latent_dims + self.action_space,
+            self.latent_dims,
             action_space * 2,
             action_model = True
         )
@@ -58,9 +58,19 @@ class Dreamer(nn.Module):
         )
 
 
+    # Sparkly fun things going on here
+    def imagine(self, datapoints, horizon : int):
+    # datapoints is a N by M vector (where N is the number of trajectories sampled and M is the length of trajectory)
+        imagined_trajs = []
+        for datapoint in datapoints:
+            imagined_traj = []
+            for i in range(horizon):
+                imagined_traj.append()
+    # Will return new trajectories of states and actions that will be used to train our model
+
     def model_update(
         self,
-    ):
+        ):
         # Need to update the model so that a) it learns what the world model is, b) it learns the transition states, c) it learns the reward values from the states
         pass
         
@@ -69,7 +79,7 @@ class Dreamer(nn.Module):
     def agent_update(
             self,
             data_points
-            ):
+        ):
 
 
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)

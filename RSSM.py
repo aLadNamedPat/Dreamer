@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from conv_env_dec import ConvDecoder, ConvEncoder
 
-
 class RSSM(nn.Module):
     '''
     World Model Structure is the following
@@ -44,18 +43,6 @@ class RSSM(nn.Module):
         posterior_states[0] = prev_state
 
         
-<<<<<<< HEAD
-        return {
-            'mean': mean,
-            'std': std,
-            'sample': latent_state,
-            'belief': belief,
-            'rnn_state': belief,
-        }
-    
-    def getModelParams(self):
-        return list(self.rnn.parameters()) + list(self.transition_model.parameters()) + list(self.representation_model.parameters()) + list(self.reward_model.parameters())
-=======
         for t in range(time_steps - 1):
             if observations is None:
                 state = prior_states[t]
@@ -87,12 +74,7 @@ class RSSM(nn.Module):
             states = [torch.stack(beliefs[1:], dim=0), torch.stack(prior_states[1:], dim=0), torch.stack(prior_means[1:], dim=0), torch.stack(prior_std_devs[1:], dim=0)]
             if observations:
                 states += [torch.stack(posterior_states[1:], dim=0), torch.stack(posterior_means[1:], dim=0), torch.stack(posterior_std_devs[1:], dim=0)]
-<<<<<<< HEAD
-            return states
->>>>>>> refs/remotes/origin/main
-=======
                 decoded_observations = [self.decoder(state) for state in posterior_states[1:]]
                 states.append(torch.stack(decoded_observations, dim=0))
                 
             return states
->>>>>>> d6775453ca1a6930600c28188111d39b46755df5
