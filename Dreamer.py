@@ -39,7 +39,7 @@ class Dreamer(nn.Module):
 
         # Actor needs to output the action to take at a standard deviation
         self.actor = DenseConnections(
-            self.state_dims + self.belief_dims,
+            self.state_dims + self.latent_dims,
             action_space,
             action_model = True
         )
@@ -56,11 +56,7 @@ class Dreamer(nn.Module):
             input_dims, 
             action_space,
 
-
         )
-
-
-
 
     # Sparkly fun things going on here
     def latent_imagine(self, latents, posterior, horizon : int):
@@ -156,7 +152,7 @@ class Dreamer(nn.Module):
         # Generates 50 random datapoints of length 50
         # This is going to have the reward of each state generated
         datapoints = torch.cat([beliefs, states], dim = 0)
-        rewards = self.RSSM.reward_model(datapoints.reshape(self.num_points * self.data_length, -1))
+        rewards = self.RSSM(datapoints.reshape(self.num_points * self.data_length, -1))[-1]
         rewards = rewards.reshape(self.num_points, self.data_length, -1)
         # This is going to have the value of each state generated, we want to flatten because the 
         values = self.critic(datapoints.reshape(self.num_points * self.data_length, -1))
