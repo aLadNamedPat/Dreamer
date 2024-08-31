@@ -34,69 +34,52 @@ class RSSM(nn.Module):
         self.relu = nn.ReLU()
     
     ## Heavily based off of: https://github.com/zhaoyi11/dreamer-pytorch/blob/master/models.py 
-    def forward(self, prev_state, actions, prev_latent_space, nonterminals = None, observations = None):
-        time_steps = actions.shape[0] + 1
-        latent_spaces = [torch.empty(0)] * time_steps
-        prior_states = [torch.empty(0)] * time_steps
-        prior_means = [torch.empty(0)] * time_steps
-        prior_std_devs = [torch.empty(0)] * time_steps
-        posterior_states = [torch.empty(0)] * time_steps
-        posterior_means = [torch.empty(0)] * time_steps
-        posterior_std_devs = [torch.empty(0)] * time_steps
-        rewards = [torch.empty(0)] * time_steps
-        latent_spaces[0] = prev_latent_space
-        prior_states[0] = prev_state
-        posterior_states[0] = prev_state
+    def forward(self, prev_state, action, prev_latent_space, nonterminals = None, observation = None): 
+        latent_space = prev_latent_space
+        prior_state = prev_state
+        posterior_state = prev_state
 
+        if observation is None:
+            state = prior_state
+        else:
+            state = posterior_state
+
+        if nonterminals:
+            state = state * nonterminals 
+            
+        latent_space = self.rnn(state, latent_space)
+        action = torch.tensor(action, dtype=torch.float32)
         
-        for t in range(time_steps - 1):
-            if observations is None:
-                state = prior_states[t]
-            else:
-                state = posterior_states[t]
+        ## TODO : Do we need to reduce the size of the state
+        print("State: ", state)
+        print("Action: ", action)
+        # state = state.view(-1)
+        hidden = self.relu(self.transition_pre(torch.cat([state, action], dim = -1)))
+        prior_mean, _prior_std_dev = torch.chunk(self.transition_post(hidden), 2, dim = 1)
+        prior_std_dev = F.softplus(_prior_std_dev)
+        cov_matrix = torch.diag_embed(prior_std_dev**2)
+        sampled_state = torch.distributions.MultivariateNormal(prior_mean, cov_matrix).rsample()
+        prior_state = sampled_state
 
-            if nonterminals and t != 0:
-                state = state * nonterminals[t-1] 
+        if observation is not None:
+            encoded_observation = self.encoder(observation)
+            hidden = self.relu(self.representation_pre(torch.cat([latent_space, encoded_observation], dim=1)))
+            posterior_mean, _posterior_std_dev = torch.chunk(self.representation_post(hidden), 2, dim=1)
+            posterior_std_dev = F.softplus(_posterior_std_dev)
+            cov_matrix = torch.diag_embed(posterior_std_dev**2)
+            sampled_state = torch.distributions.MultivariateNormal(posterior_mean, cov_matrix).rsample()
+            posterior_state = sampled_state
             
-            latent_spaces[t+1] = self.rnn(hidden, latent_spaces[t])
-            
-            hidden = self.relu(self.transition_pre(torch.cat([state, actions[t]], dim = 1)))
-            prior_means[t+1], _prior_std_dev = torch.chunk(self.transition_post(hidden), 2, dim = 1)
-            prior_std_devs[t+1] = F.softplus(_prior_std_dev)
-            cov_matrix = torch.diag_embed(prior_std_devs[t+1]**2)
-            sampled_state = torch.distributions.MultivariateNormal(prior_means[t+1], cov_matrix).rsample()
-            prior_states[t+1] = sampled_state
-
-            if observations is not None:
-                encoded_observation = self.encoder(observations[t])
-                hidden = self.relu(self.representation_pre(torch.cat([latent_spaces[t+1], encoded_observation], dim=1)))
-                posterior_means[t+1], _posterior_std_dev = torch.chunk(self.representation_post(hidden), 2, dim=1)
-                posterior_std_devs[t+1] = F.softplus(_posterior_std_dev)
-                cov_matrix = torch.diag_embed(posterior_std_devs[t+1]**2)
-                sampled_state = torch.distributions.MultivariateNormal(posterior_means[t+1], cov_matrix).rsample()
-                posterior_states[t+1] = sampled_state
-
-            rewards[t+1] = self.reward_model(latent_spaces[t+1], sampled_state)
-
-            ## Returns the latent spaces, states, means, and standard deviations
-            states = [torch.stack(latent_spaces[1:], dim=0), torch.stack(prior_states[1:], dim=0), torch.stack(prior_means[1:], dim=0), torch.stack(prior_std_devs[1:], dim=0)]
-            if observations:
-                states += [torch.stack(posterior_states[1:], dim=0), torch.stack(posterior_means[1:], dim=0), torch.stack(posterior_std_devs[1:], dim=0)]
-                decoded_observations = [self.decoder(state) for state in posterior_states[1:]]
-                states.append(torch.stack(decoded_observations, dim=0))
-
-            states.append(torch.stack(rewards[1:], dim=0))
-            return states
- 
-    def save_model(self,
-                   num_steps):
-        model_path = f"ModelCheckpoint/RSSM_{num_steps}.pth"
-        torch.save(self.state_dict(), model_path)
-
-    def load_model(self,
-                   num_steps):
-        model_path = f"ModelCheckpoint/RSSM_{num_steps}.pth"
-        self.load_state_dict(torch.load(model_path))
+        reward = self.reward_model(latent_space, sampled_state)
+        
+        states = [latent_space, prior_state, prior_mean, prior_std_dev]
+        if observation:
+            states += [posterior_state, posterior_mean, posterior_std_dev]
+            decoded_observation = self.decoder(posterior_state)
+            states.append(decoded_observation)
+                
+        states.append(reward)
+        return states
 
 ## Reward Model as defined by Reward Model qθ(rt | st):  
 class RewardModel(nn.Module):

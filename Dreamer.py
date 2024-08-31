@@ -82,7 +82,7 @@ class Dreamer(nn.Module):
         imagined_latent = latents.reshape(x * y, -1)
 
         action = self.actor(torch.cat([imagined_state, imagined_belief]).to(device=device))
-
+        print(f"Action Reshape {action.reshape(x, y, -1)}")
         latent_list = [imagined_latent]
         state_list = [imagined_state]
         action_list = [action]
@@ -91,10 +91,10 @@ class Dreamer(nn.Module):
             state = self.RSSM(imagined_state, action, imagined_belief)
             imagined_state, imagined_belief = state[0], state[1]
             action = self.actor(torch.cat([imagined_state, imagined_belief]).to(device=device))
-
+            action.reshape(x, y, -1)
             latent_list.append(imagined_latent)
             state_list.append(imagined_state)
-            action_list.append(action_list)
+            action_list.append(action)
 
         
         latent_list = torch.stack(latent_list, dim = 0).to(device = device)
@@ -115,9 +115,7 @@ class Dreamer(nn.Module):
         prev_latent_space = torch.zeros((self.batch_size, self.RSSM.latent_dim))
         
         # Forward pass through the RSSM
-        latent_spaces, prior_states, prior_means, prior_std_devs, \
-        posterior_states, posterior_means, posterior_std_devs, \
-        decoded_observations, rewards = self.RSSM(
+        latent_spaces, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs, decoded_observations, rewards = self.RSSM(
             prev_state, 
             actions, 
             prev_latent_space, 
@@ -210,19 +208,24 @@ class Dreamer(nn.Module):
             self.num_timesteps += 1
             done = False
             action = self.sample_action(torch.cat([self.prev_state, self.prev_latent_space]))
+            print(f"First Action: {action}")
             timestep = self.env.step(action)
             obs = torch.tensor(self.env.physics.render(camera_id=0, height=120, width=160).copy())
             if (t == self.batch_train_freq - 1):
                 done = True
-            latent_spaces, prior_states, prior_means, prior_std_devs, \
-            posterior_states, posterior_means, posterior_std_devs, \
-            decoded_observations, rewards = self.RSSM(
+            states = self.RSSM(
                 self.prev_state, 
                 action, 
                 self.prev_latent_space, 
                 nonterminals=1-done, 
-                observations=obs
+                observation=obs
             )
+
+            print(f"States {states}")
+            if obs is not None:
+                latent_spaces, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs, decoded_observations, rewards = states
+            else:
+                latent_spaces, prior_states, prior_means, prior_std_devs, rewards = states
 
             self.prev_state = posterior_states
             self.prev_latent_space = latent_spaces
