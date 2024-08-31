@@ -1,36 +1,41 @@
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F
+from conv_env_dec import ConvDecoder, ConvEncoder
 
 class RSSM(nn.Module):
+    '''
+    World Model Structure is the following
+        Representation Model pθ(st | st-1, at-1, ot):
+            Encoder (observation_dim, latent_dim) --> MLP (latent_dim + action_dim + latent_dim, hidden_dim) --> GRU Block 
+            --> Decoder(hidden_dim) 
+        
+        Transition Model qθ(st | st-1, at-1): 
+            MLP (latent_dim + action_dim, hidden_dim) --> GRU Block 
+
+        Reward Model qθ(rt | st):  
+            
+    '''
+
     def __init__(self, latent_dim, action_dim, observation_dim, hidden_dim):
         super(RSSM, self).__init__()
-        
         self.latent_dim = latent_dim
         self.hidden_dim = hidden_dim
+
+        self.encoder = ConvEncoder(observation_dim, latent_dim)
+        self.decoder = ConvDecoder(hidden_dim, observation_dim)
+        self.rnn = nn.GRUCell(input_size=hidden_dim, hidden_size=hidden_dim)
         
-        self.rnn = nn.GRUCell(input_size=latent_dim + action_dim, hidden_size=hidden_dim)
-        
-        # Representation model pθ(st | st-1, at-1, ot)
-        self.representation_model = nn.Sequential(
-            nn.Linear(latent_dim + action_dim + observation_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 2 * latent_dim),
-        )
-        
-        # Transition model qθ(st | st-1, at-1)
-        self.transition_model = nn.Sequential(
-            nn.Linear(latent_dim + action_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 2 * latent_dim),
-        )
-        
-        # Reward model qθ(rt | st)
-        self.reward_model = nn.Sequential(
-            nn.Linear(latent_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 1),
-        )
+        self.representation_prefix = nn.Linear(2 * latent_dim + action_dim, hidden_dim),
+        self.representation_post = nn.Linear(hidden_dim, 2 * latent_dim)
+
+        self.transition_prefix = nn.Linear(latent_dim + action_dim, hidden_dim)
+        self.transition_post = nn.Linear(hidden_dim, 2 * latent_dim)
+
+        self.reward_prefix = nn.Linear(latent_dim, hidden_dim)
+        self.reward_post = nn.Linear(hidden_dim, 1)
+
+        self.relu = nn.ReLU()
     
     def representation(self, prev_state, prev_action, observation):
         input = torch.cat([prev_state, prev_action, observation], dim=-1)
