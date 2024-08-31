@@ -206,15 +206,13 @@ class Dreamer(nn.Module):
     def rollout(
         self,
     ):
-        t = 0
-        while (t < self.batch_train_freq):
-            t += 1
+        for t in range(self.batch_train_freq):
             self.num_timesteps += 1
             done = False
             action = self.sample_action(torch.cat([self.prev_state, self.prev_latent_space]))
             timestep = self.env.step(action)
             obs = torch.tensor(self.env.physics.render(camera_id=0, height=120, width=160).copy())
-            if (t == self.batch_train_freq):
+            if (t == self.batch_train_freq - 1):
                 done = True
             latent_spaces, prior_states, prior_means, prior_std_devs, \
             posterior_states, posterior_means, posterior_std_devs, \
@@ -227,7 +225,7 @@ class Dreamer(nn.Module):
             )
 
             self.prev_state = posterior_states
-            self.latent_space = latent_spaces
+            self.prev_latent_space = latent_spaces
 
             self.replayBuffer.add((self.last_obs, action, timestep.reward, obs, done))
             self.last_obs = obs
@@ -254,6 +252,10 @@ class Dreamer(nn.Module):
             # The data that the agent update receives should be the encoded space already to save memory
             actor_loss, critic_loss = self.agent_update(beliefs, states)
             obs = self.env.reset()
+            render = self.env.physics.render(camera_id=0, height=120, width=160)
+            self.last_obs = torch.tensor(render.copy()).to(device)
+            self.prev_state = torch.zeros((self.batch_size, self.RSSM.state_dim))
+            self.prev_latent_space = torch.zeros((self.batch_size, self.RSSM.latent_dim))
 
             # Log training progress to wandb
             wandb.log({
@@ -344,22 +346,17 @@ class DenseConnections(nn.Module):
             mean, std = torch.chunk(self.l3(x), 2, dim = -1)
             action = torch.tanh(mean + std * torch.randn_like(mean))
             return action
-        
-    def save_model(self,
-                   num_steps):
+
+    def save_model(self, num_steps):
         if self.action_model:
             model_path = f"ModelCheckpoint/actor{num_steps}.pth"
         else:
             model_path = f"ModelCheckpoints/critic{num_steps}.pth"
-
         torch.save(self.state_dict(), model_path)
 
-    def load_model(self,
-                   num_steps):
-        
+    def load_model(self, num_steps):
         if self.action_model:
             model_path = f"ModelCheckpoint/actor{num_steps}.pth"
         else:
             model_path = f"ModelCheckpoint/critic{num_steps}.pth"
-
         self.load_state_dict(torch.load(model_path))

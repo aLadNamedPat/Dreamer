@@ -3,11 +3,53 @@ import yaml
 from dm_control import suite
 from dm_control import viewer
 from Dreamer import Dreamer
+import numpy as np
+import matplotlib.pyplot as plt
+import torch
 
 def load_config(config_path):
     with open(config_path, 'r') as file:
         return yaml.safe_load(file)
 
+def run(configurations, dreamer : Dreamer):
+    env = suite.load(domain_name=configurations['env']['domain_name'], task_name=configurations['env']['task_name'])
+    camera_id = 0
+    timesteps = configurations['training']['timesteps']
+    obs = env.reset()
+    render = env.physics.render(camera_id=camera_id, height=120, width=160)
+    last_obs = torch.tensor(render.copy())
+    prev_state = torch.zeros((config['dreamer']['state_dims']))
+    prev_latent_space = torch.zeros((config['dreamer']['latent_dims']))
+
+    for _ in range(timesteps):
+        action = dreamer.actor(torch.cat([prev_state, prev_latent_space]))
+        timestep = env.step(action)
+        obs = torch.tensor(env.physics.render(camera_id=0, height=120, width=160).copy())
+    
+        # Take a step in the environment
+        time_step = env.step(action)
+        done = False
+        latent_spaces, prior_states, prior_means, prior_std_devs, \
+        posterior_states, posterior_means, posterior_std_devs, \
+        decoded_observations, rewards = dreamer.RSSM(
+            prev_state, 
+            action, 
+            prev_latent_space, 
+            nonterminals=1-done, 
+            observations=obs
+        )
+
+        prev_state = posterior_states
+        prev_latent_space = latent_spaces
+
+        print(time_step)
+        # Render and display the current pixel observation
+               
+        plt.imshow(obs)
+        plt.axis('off')
+        plt.pause(0.01)  # Small pause to allow image display
+ 
+        
 if __name__ == '__main__':
     config = load_config('config.yaml')
 
@@ -33,4 +75,4 @@ if __name__ == '__main__':
 
     dreamer.train(timesteps, num_points, data_length)
 
-    
+    run(config, dreamer)
