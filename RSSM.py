@@ -6,23 +6,17 @@ from conv_env_dec import ConvDecoder, ConvEncoder
 class RSSM(nn.Module):
     '''
     World Model Structure is the following
-        Representation Model pθ(st | st-1, at-1, ot):
-            Encoder (observation_dim, state_dim) --> MLP (state_dim + action_dim + state_dim, hidden_dim) --> GRU Block 
-            --> Decoder(hidden_dim) 
-        
-        Transition Model qθ(st | st-1, at-1): 
-            MLP (state_dim + action_dim, hidden_dim) --> GRU Block 
-
-        Reward Model qθ(rt | st):  
-            
+    Representation Model pθ(st | st-1, at-1, ot)
+    Transition Model qθ(st | st-1, at-1): 
+    Reward Model qθ(rt | st):  
     '''
 
-    def __init__(self, state_dim, action_dim, observation_dim, hidden_dim):
+    def __init__(self, state_dim, action_dim, observation_dim, o_feature_dim, hidden_dim, reward_dim):
         super(RSSM, self).__init__()
         self.state_dim = state_dim
         self.hidden_dim = hidden_dim
 
-        self.encoder = ConvEncoder(observation_dim, state_dim)
+        self.encoder = ConvEncoder(observation_dim, o_feature_dim)
         self.decoder = ConvDecoder(hidden_dim, observation_dim)
         self.rnn = nn.GRUCell(input_size=hidden_dim, hidden_size=hidden_dim)
         
@@ -30,7 +24,7 @@ class RSSM(nn.Module):
         self.transition_pre = nn.Linear(state_dim + action_dim, hidden_dim)
         self.transition_post = nn.Linear(hidden_dim, 2 * state_dim)
         
-        self.representation_pre = nn.Linear(hidden_dim + observation_dim, hidden_dim)
+        self.representation_pre = nn.Linear(hidden_dim + o_feature_dim, hidden_dim)
         self.representation_post = nn.Linear(hidden_dim, 2 * state_dim)
         self.relu = nn.ReLU()
     
@@ -68,7 +62,8 @@ class RSSM(nn.Module):
             prior_states[t+1] = latent_state
 
             if observations is not None:
-                hidden = self.relu(self.representation_pre(torch.cat([beliefs[t+1], observations[t]], dim=1)))
+                encoded_observation = self.encoder(observations[t])
+                hidden = self.relu(self.representation_pre(torch.cat([beliefs[t+1], encoded_observation], dim=1)))
                 posterior_means[t+1], _posterior_std_dev = torch.chunk(self.representation_post(hidden), 2, dim=1)
                 posterior_std_devs[t+1] = F.softplus(_posterior_std_dev)
                 cov_matrix = torch.diag_embed(posterior_std_devs[t+1]**2)
@@ -77,6 +72,9 @@ class RSSM(nn.Module):
             
             ## Returns the beliefs, states, means, and standard deviations
             states = [torch.stack(beliefs[1:], dim=0), torch.stack(prior_states[1:], dim=0), torch.stack(prior_means[1:], dim=0), torch.stack(prior_std_devs[1:], dim=0)]
-            if observations is not None:
+            if observations:
                 states += [torch.stack(posterior_states[1:], dim=0), torch.stack(posterior_means[1:], dim=0), torch.stack(posterior_std_devs[1:], dim=0)]
+                decoded_observations = [self.decoder(state) for state in posterior_states[1:]]
+                states.append(torch.stack(decoded_observations, dim=0))
+                
             return states
