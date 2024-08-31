@@ -213,6 +213,7 @@ class Dreamer(nn.Module):
             obs = torch.tensor(self.env.physics.render(camera_id=0, height=120, width=160).copy())
             if (t == self.batch_train_freq - 1):
                 done = True
+            
             states = self.RSSM(
                 self.prev_state, 
                 action, 
@@ -244,8 +245,8 @@ class Dreamer(nn.Module):
         obs = self.env.reset()
         render = self.env.physics.render(camera_id=0, height=120, width=160)
         self.last_obs = torch.tensor(render.copy()).to(device)
-        self.prev_state = torch.zeros((self.batch_size, self.RSSM.state_dim))
-        self.prev_latent_space = torch.zeros((self.batch_size, self.RSSM.latent_dim))
+        self.prev_state = torch.zeros((self.RSSM.state_dim))
+        self.prev_latent_space = torch.zeros((self.RSSM.latent_dim))
 
         self.num_timesteps = 0
         while (self.num_timesteps < timesteps):
