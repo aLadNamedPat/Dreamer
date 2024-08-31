@@ -214,7 +214,7 @@ class Dreamer(nn.Module):
         self.num_points = num_points
         self.data_length = data_length
         obs = self.env.reset()
-        self.last_obs = self.RSSM(torch.tensor(self.env.physics.render(camera_id=0, height=120, width=160)).to(device))[]
+        self.last_obs = torch.tensor(self.env.physics.render(camera_id=0, height=120, width=160)).to(device)
         self.num_timesteps = 0
         while (self.num_timesteps < timesteps):
             self.rollout()
