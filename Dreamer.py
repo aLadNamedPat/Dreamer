@@ -69,6 +69,8 @@ class Dreamer(nn.Module):
     # Will return new trajectories of states and actions that will be used to train our model
 
     def model_update(self):
+        self.RSSM_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
+        
         # Sample a batch of experiences from the replay buffer
         states, actions, rewards_real, next_states, dones = self.replayBuffer.sample(self.batch_size, self.sample_steps, random_flag=True)
         
