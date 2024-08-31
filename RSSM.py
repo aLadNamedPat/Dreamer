@@ -1,61 +1,56 @@
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F
+from conv_env_dec import ConvDecoder, ConvEncoder
 
 
 class RSSM(nn.Module):
-    def __init__(self, latent_dim, action_dim, observation_dim, hidden_dim):
+    '''
+    World Model Structure is the following
+        Representation Model pθ(st | st-1, at-1, ot):
+            Encoder (observation_dim, state_dim) --> MLP (state_dim + action_dim + state_dim, hidden_dim) --> GRU Block 
+            --> Decoder(hidden_dim) 
+        
+        Transition Model qθ(st | st-1, at-1): 
+            MLP (state_dim + action_dim, hidden_dim) --> GRU Block 
+
+        Reward Model qθ(rt | st):  
+            
+    '''
+
+    def __init__(self, state_dim, action_dim, observation_dim, hidden_dim):
         super(RSSM, self).__init__()
-        
-        self.latent_dim = latent_dim
+        self.state_dim = state_dim
         self.hidden_dim = hidden_dim
+
+        self.encoder = ConvEncoder(observation_dim, state_dim)
+        self.decoder = ConvDecoder(hidden_dim, observation_dim)
+        self.rnn = nn.GRUCell(input_size=hidden_dim, hidden_size=hidden_dim)
         
-        self.rnn = nn.GRUCell(input_size=latent_dim + action_dim, hidden_size=hidden_dim)
         
-        # Representation model pθ(st | st-1, at-1, ot)
-        self.representation_model = nn.Sequential(
-            nn.Linear(latent_dim + action_dim + observation_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 2 * latent_dim),
-        )
+        self.transition_pre = nn.Linear(state_dim + action_dim, hidden_dim)
+        self.transition_post = nn.Linear(hidden_dim, 2 * state_dim)
         
-        # Transition model qθ(st | st-1, at-1)
-        self.transition_model = nn.Sequential(
-            nn.Linear(latent_dim + action_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 2 * latent_dim),
-        )
-        
-        # Reward model qθ(rt | st)
-        self.reward_model = nn.Sequential(
-            nn.Linear(latent_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 1),
-        )
+        self.representation_pre = nn.Linear(hidden_dim + observation_dim, hidden_dim)
+        self.representation_post = nn.Linear(hidden_dim, 2 * state_dim)
+        self.relu = nn.ReLU()
     
-    def representation(self, prev_state, prev_action, observation):
-        input = torch.cat([prev_state, prev_action, observation], dim=-1)
-        output = self.representation_model(input)
-        mean, std = torch.chunk(output, 2, dim=-1)
-        return mean, std
-    
-    def transition(self, prev_state, prev_action):
-        input = torch.cat([prev_state, prev_action], dim=-1)
-        output = self.transition_model(input)
-        mean, std = torch.chunk(output, 2, dim=-1)
-        return mean, std
-    
-    def reward(self, latent_state):
-        reward = self.reward_model(latent_state)
-        return reward
-    
-    def forward(self, prev_state, prev_action, observation):
-        mean, std = self.representation(prev_state, prev_action, observation)
-        std = F.softplus(std)  # Ensure std is positive
-        cov_matrix = torch.diag_embed(std**2)
-        latent_state = torch.distributions.MultivariateNormal(mean, cov_matrix).rsample()
-        belief = self.rnn(torch.cat([latent_state, prev_action], dim=-1), prev_state)
+    ## Heavily based off of: https://github.com/zhaoyi11/dreamer-pytorch/blob/master/models.py 
+    def forward(self, prev_state, actions, prev_belief, nonterminals = None, observations = None):
+        time_steps = actions.shape[0] + 1
+        beliefs = [torch.empty(0)] * time_steps
+        prior_states = [torch.empty(0)] * time_steps
+        prior_means = [torch.empty(0)] * time_steps
+        prior_std_devs = [torch.empty(0)] * time_steps
+        posterior_states = [torch.empty(0)] * time_steps
+        posterior_means = [torch.empty(0)] * time_steps
+        posterior_std_devs = [torch.empty(0)] * time_steps
+        beliefs[0] = prev_belief
+        prior_states[0] = prev_state
+        posterior_states[0] = prev_state
+
         
+<<<<<<< HEAD
         return {
             'mean': mean,
             'std': std,
@@ -66,3 +61,36 @@ class RSSM(nn.Module):
     
     def getModelParams(self):
         return list(self.rnn.parameters()) + list(self.transition_model.parameters()) + list(self.representation_model.parameters()) + list(self.reward_model.parameters())
+=======
+        for t in range(time_steps - 1):
+            if observations is None:
+                state = prior_states[t]
+            else:
+                state = posterior_states[t]
+
+            if nonterminals and t != 0:
+                state = state * nonterminals[t-1] 
+            
+            beliefs[t+1] = self.rnn(hidden, beliefs[t])
+            
+            hidden = self.relu(self.transition_pre(torch.cat([state, actions[t]], dim = 1)))
+            prior_means[t+1], _prior_std_dev = torch.chunk(self.transition_post(hidden), 2, dim = 1)
+            prior_std_devs[t+1] = F.softplus(_prior_std_dev)
+            cov_matrix = torch.diag_embed(prior_std_devs[t+1]**2)
+            latent_state = torch.distributions.MultivariateNormal(prior_means[t+1], cov_matrix).rsample()
+            prior_states[t+1] = latent_state
+
+            if observations is not None:
+                hidden = self.relu(self.representation_pre(torch.cat([beliefs[t+1], observations[t]], dim=1)))
+                posterior_means[t+1], _posterior_std_dev = torch.chunk(self.representation_post(hidden), 2, dim=1)
+                posterior_std_devs[t+1] = F.softplus(_posterior_std_dev)
+                cov_matrix = torch.diag_embed(posterior_std_devs[t+1]**2)
+                latent_state = torch.distributions.MultivariateNormal(posterior_means[t+1], cov_matrix).rsample()
+                posterior_states[t+1] = latent_state
+            
+            ## Returns the beliefs, states, means, and standard deviations
+            states = [torch.stack(beliefs[1:], dim=0), torch.stack(prior_states[1:], dim=0), torch.stack(prior_means[1:], dim=0), torch.stack(prior_std_devs[1:], dim=0)]
+            if observations is not None:
+                states += [torch.stack(posterior_states[1:], dim=0), torch.stack(posterior_means[1:], dim=0), torch.stack(posterior_std_devs[1:], dim=0)]
+            return states
+>>>>>>> refs/remotes/origin/main
