@@ -43,8 +43,6 @@ class Dreamer(nn.Module):
         self.batch_train_freq = batch_train_freq
         self.replayBuffer = Buffer(buffer_size)
         self.sample_steps = sample_steps
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=8e-5)
 
         # Actor needs to output the action to take at a standard deviation
         self.actor = DenseConnections(
@@ -69,6 +67,9 @@ class Dreamer(nn.Module):
             latent_dim=self.latent_dims,
             reward_dim=self.reward_dim
         )
+        
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=8e-5)
 
     # Sparkly fun things going on here
     def latent_imagine(self, latents, posterior, horizon : int):
