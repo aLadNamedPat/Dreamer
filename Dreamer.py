@@ -40,7 +40,7 @@ class Dreamer(nn.Module):
         # Actor needs to output the action to take at a standard deviation
         self.actor = DenseConnections(
             self.state_dims + self.belief_dims,
-            action_space * 2,
+            action_space,
             action_model = True
         )
 
@@ -59,6 +59,8 @@ class Dreamer(nn.Module):
         )
 
 
+
+
     # Sparkly fun things going on here
     def latent_imagine(self, beliefs, posterior, horizon : int):
     # Latent imagination receives the beliefs and the posterior where the beliefs are the probability distribution over possible events whereas the posterior is the deterministic
@@ -70,9 +72,7 @@ class Dreamer(nn.Module):
         imagined_state = posterior.reshape(x * y, -1)
         imagined_belief = beliefs.reshape(x * y, -1)
 
-        # Action needs to change tommorrow because it shouldn't be stored as an actual value (?)
-        action_mean, action_std = torch.chunk(self.actor(torch.cat([imagined_state, imagined_belief]).to(device=device)), 2)
-        action = action_mean + action_std * torch.randn_like(action_mean)
+        action = self.actor(torch.cat([imagined_state, imagined_belief]).to(device=device))
 
         belief_list = [imagined_belief]
         state_list = [imagined_state]
@@ -81,8 +81,7 @@ class Dreamer(nn.Module):
         for j in range(horizon):
             state = self.RSSM(imagined_state, action, imagined_belief)
             imagined_state, imagined_belief = state[0], state[1]
-            action_mean, action_std = torch.chunk(self.actor(torch.cat([imagined_state, imagined_belief]).to(device=device)), 2)
-            action = action_mean + action_std * torch.randn_like(action_mean)
+            action = self.actor(torch.cat([imagined_state, imagined_belief]).to(device=device))
 
             belief_list.append(imagined_belief)
             state_list.append(imagined_state)
@@ -117,7 +116,6 @@ class Dreamer(nn.Module):
             nonterminals=1-dones, 
             observations=states
         )
-    
         
         # Calculate the MSE loss for observation and decoded observation
         mse_loss = nn.MSELoss()
@@ -128,8 +126,8 @@ class Dreamer(nn.Module):
             torch.distributions.Normal(posterior_means, posterior_std_devs),
             torch.distributions.Normal(prior_means, prior_std_devs)
         ).mean()
-        
 
+        beliefs, states, actions = self.latent_imagine(prev_state, posterior_means, 15)
         # TO DO: Calculate the following properly!!!!
         # Calculate the reward loss
         reward_loss = mse_loss(rewards_real, rewards)
@@ -142,21 +140,25 @@ class Dreamer(nn.Module):
         total_loss.backward()
         self.RSSM_optimizer.step()
         
+        return beliefs, states, actions
+
 
     # The agent is only training on the imagined states. All compute trajectories are imagined.
     def agent_update(
             self,
-            data_points
+            beliefs,
+            states,
         ):
 
 
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
         # Generates 50 random datapoints of length 50
         # This is going to have the reward of each state generated
-        rewards = self.rewards(data_points.reshape(self.num_points * self.data_length, -1))
+        datapoints = torch.cat([beliefs, states], dim = 0)
+        rewards = self.RSSM.reward_model(datapoints.reshape(self.num_points * self.data_length, -1))
         rewards = rewards.reshape(self.num_points, self.data_length, -1)
         # This is going to have the value of each state generated, we want to flatten because the 
-        values = self.critic(self.batch_sample.reshape(self.num_points * self.data_length, -1))
+        values = self.critic(datapoints.reshape(self.num_points * self.data_length, -1))
         values = values.reshape(self.num_points, self.data_length, -1)
 
         # This should return the returns for each of the 50 randomly genearted trajectories
@@ -180,7 +182,7 @@ class Dreamer(nn.Module):
         # Use Log_prob as loss instead of MSE
         # Actor loss is the negative of the predicted returns
         # Value loss is the "KL" loss between the predicted value and the actual value 
-        return # Return the world model loss, actor loss, critic loss
+        return actor_loss, critic_loss # Return the world model loss, actor loss, critic loss
 
     def rollout(
         self,
@@ -211,13 +213,11 @@ class Dreamer(nn.Module):
         self.num_timesteps = 0
         while (self.num_timesteps < timesteps):
             self.rollout()
-            data_points = self.replayBuffer.sample(num_points, data_length, random_flag = False)
-            self.model_update(data_points)
-
+            beliefs, states = self.model_update()
             # The data that the agent update receives should be the encoded space already to save memory
-            data_points_updated = None
-            self.agent_update(data_points_updated)
-
+            self.agent_update(beliefs, states)
+        
+        return
     ### NEED TO EDIT THIS SO THAT REPRESENTATION MODEL ENCODES THE VALUES
     def sample_action(
         self,
@@ -227,9 +227,9 @@ class Dreamer(nn.Module):
         if (self.num_timesteps < self.sample_steps):
             return np.random.uniform(low=-1.0, high=1.0, size=self.env.action_spec().shape)
         elif not predict_mode:
-            return self.actor(pixels).sample() + 0.3 * torch.randn_like(self.env.action_spec().shape)
+            return self.actor(pixels) + 0.3 * torch.randn_like(self.env.action_spec().shape)
         else:
-            return self.actor(pixels).sample()
+            return self.actor(pixels)
 
 
 # Help from https://github.com/juliusfrost/dreamer-pytorch/blob/main/dreamer/algos/dreamer_algo.py for finding returns
@@ -265,26 +265,22 @@ class DenseConnections(nn.Module):
                  input_dims : int, 
                  output_dims : int, 
                  mid_dims :int = 300, 
-                 predict_std : bool = False):
+                 action_model : bool = False):
         super(DenseConnections, self).__init__()
         self.l1 = nn.Linear(input_dims, mid_dims)
         self.l2 = nn.Linear(mid_dims, mid_dims)
+        self.l3 = nn.Linear(mid_dims, 2 * output_dims)
 
-        self.predict_std = predict_std
-        if self.predict_std:
-            self.l3 = nn.Linear(mid_dims, 2 * output_dims)
-        else:
-            self.l3 = nn.Linear(mid_dims, output_dims)
-
+        self.action_model = action_model
 
     def forward(self, input : torch.Tensor):
         x = nn.ELU(self.l1(input))
         x = nn.ELU(self.l2(x))
-        if self.predict_std:
+        if not self.action_model: # For the value model
             mean, std = torch.chunk(self.l3(x), 2, dim=-1)
             cov_mat = torch.diagonal(std)
             return MultivariateNormal(mean, cov_mat)
-        else:
-            x = self.l3(x)
-
-        return x
+        else: # For the actor model
+            mean, std = torch.chunk(self.l3(x), 2, dim = -1)
+            action = torch.tanh(mean + std * torch.randn_like(mean))
+            return action
