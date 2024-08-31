@@ -4,8 +4,9 @@ import numpy as np
 from ReplayBuffer import Buffer 
 from RSSM import RSSM
 from torch.distributions.multivariate_normal import MultivariateNormal
+import wandb
 
-device = torch.device("cuda")
+# device = torch.device("cuda")
 
 class Dreamer(nn.Module):
     def __init__(
@@ -148,6 +149,14 @@ class Dreamer(nn.Module):
         total_loss.backward()
         self.RSSM_optimizer.step()
         
+        # Log losses to wandb
+        wandb.log({
+            "observation_loss": observation_loss.item(),
+            "kl_loss": kl_loss.item(),
+            "reward_loss": reward_loss.item(),
+            "total_loss": total_loss.item()
+        })
+        
         return beliefs, states, actions
 
 
@@ -184,6 +193,12 @@ class Dreamer(nn.Module):
         critic_loss.backwards()
         self.critic_optimizer.step()
 
+        # Log losses to wandb
+        wandb.log({
+            "actor_loss": actor_loss.item(),
+            "critic_loss": critic_loss.item()
+        })
+
         # Use Log_prob as loss instead of MSE
         # Actor loss is the negative of the predicted returns
         # Value loss is the "KL" loss between the predicted value and the actual value 
@@ -217,11 +232,19 @@ class Dreamer(nn.Module):
         self.last_obs = torch.tensor(self.env.physics.render(camera_id=0, height=120, width=160)).to(device)
         self.num_timesteps = 0
         while (self.num_timesteps < timesteps):
+            # wandb.init(project="dreamer_training", reinit=True)
             self.rollout()
             beliefs, states = self.model_update()
             # The data that the agent update receives should be the encoded space already to save memory
-            self.agent_update(beliefs, states)
+            actor_loss, critic_loss = self.agent_update(beliefs, states)
             obs = self.env.reset()
+
+            # Log training progress to wandb
+            wandb.log({
+                "num_timesteps": self.num_timesteps,
+                "actor_loss": actor_loss.item(),
+                "critic_loss": critic_loss.item()
+            })
 
         return
     
