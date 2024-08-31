@@ -39,13 +39,8 @@ class Dreamer(nn.Module):
 
         # Actor needs to output the action to take at a standard deviation
         self.actor = DenseConnections(
-<<<<<<< HEAD
-            self.state_dims + self.latent_dims,
-            action_space * 2,
-=======
             self.state_dims + self.belief_dims,
             action_space,
->>>>>>> 4608a4038868ca37655cfed99b9b76e93278546f
             action_model = True
         )
 
