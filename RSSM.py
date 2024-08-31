@@ -75,18 +75,28 @@ class RSSM(nn.Module):
                 cov_matrix = torch.diag_embed(posterior_std_devs[t+1]**2)
                 sampled_state = torch.distributions.MultivariateNormal(posterior_means[t+1], cov_matrix).rsample()
                 posterior_states[t+1] = sampled_state
-            
+
             rewards[t+1] = self.reward_model(latent_spaces[t+1], sampled_state)
-            
+
             ## Returns the latent spaces, states, means, and standard deviations
             states = [torch.stack(latent_spaces[1:], dim=0), torch.stack(prior_states[1:], dim=0), torch.stack(prior_means[1:], dim=0), torch.stack(prior_std_devs[1:], dim=0)]
             if observations:
                 states += [torch.stack(posterior_states[1:], dim=0), torch.stack(posterior_means[1:], dim=0), torch.stack(posterior_std_devs[1:], dim=0)]
                 decoded_observations = [self.decoder(state) for state in posterior_states[1:]]
                 states.append(torch.stack(decoded_observations, dim=0))
-                
+
             states.append(torch.stack(rewards[1:], dim=0))
             return states
+ 
+    def save_model(self,
+                   num_steps):
+        model_path = f"ModelCheckpoint/RSSM_{num_steps}.pth"
+        torch.save(self.state_dict(), model_path)
+
+    def load_model(self,
+                   num_steps):
+        model_path = f"ModelCheckpoint/RSSM_{num_steps}.pth"
+        self.load_state_dict(torch.load(model_path))
 
 ## Reward Model as defined by Reward Model qθ(rt | st):  
 class RewardModel(nn.Module):

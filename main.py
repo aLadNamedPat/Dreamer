@@ -32,3 +32,5 @@ if __name__ == '__main__':
     data_length = config['training']['data_length']
 
     dreamer.train(timesteps, num_points, data_length)
+
+    
