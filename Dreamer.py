@@ -5,6 +5,8 @@ from ReplayBuffer import Buffer
 from RSSM import RSSM
 from torch.distributions.multivariate_normal import MultivariateNormal
 import wandb
+import pickle
+import gzip
 
 device = torch.device("cpu")
 
@@ -57,18 +59,16 @@ class Dreamer(nn.Module):
         # def __init__(self, state_dim, action_dim, observation_dim, o_feature_dim, latent_dim, reward_dim):
         self.RSSM = RSSM(
             state_dim=self.state_dims,
-            action_dim=self.action_space,
+            action_dim=self.action_space.shape[0],
             observation_dim=self.observation_dim,
             o_feature_dim=self.o_feature_dim,
             latent_dim=self.latent_dims,
             reward_dim=self.reward_dim
         )
-        
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=8e-5)
 
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=8e-5)
+        self.RSSM_optimizer = torch.optim.Adam(self.RSSM.parameters(), lr =6e-4)
 
     # Sparkly fun things going on here
     def latent_imagine(self, latents, posterior, horizon : int):
@@ -106,7 +106,6 @@ class Dreamer(nn.Module):
     # Will return new trajectories of states and actions that will be used to train our model
 
     def model_update(self):
-        self.RSSM_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
 
         # Sample a batch of experiences from the replay buffer
         states, actions, rewards_real, next_states, dones = self.replayBuffer.sample(self.batch_size, self.sample_steps, random_flag=True)
@@ -309,7 +308,20 @@ class Dreamer(nn.Module):
             outputs.append(curr_val)
 
         return outputs
+    
+    def save_models(self, num_timestep):
+        self.actor.save_model(num_timestep)
+        self.critic.save_model(num_timestep)
 
+        with gzip.open(f"Buffers/buffer{num_timestep}", 'wb') as f:
+            pickle.dump(self.replayBuffer, f)
+
+    def load_model(self, num_timestep):
+        self.actor.load_model(num_timestep)
+        self.critic.load_model(num_timestep)
+
+        with gzip.open(f"Buffers/buffer{num_timestep}", 'rb') as f:
+            self.memory = pickle.load(f)
 
 class DenseConnections(nn.Module):
     def __init__(self, 
@@ -335,3 +347,22 @@ class DenseConnections(nn.Module):
             mean, std = torch.chunk(self.l3(x), 2, dim = -1)
             action = torch.tanh(mean + std * torch.randn_like(mean))
             return action
+        
+    def save_model(self,
+                   num_steps):
+        if self.action_model:
+            model_path = f"ModelCheckpoint/actor{num_steps}.pth"
+        else:
+            model_path = f"ModelCheckpoints/critic{num_steps}.pth"
+
+        torch.save(self.state_dict(), model_path)
+
+    def load_model(self,
+                   num_steps):
+        
+        if self.action_model:
+            model_path = f"ModelCheckpoint/actor{num_steps}.pth"
+        else:
+            model_path = f"ModelCheckpoint/critic{num_steps}.pth"
+
+        self.load_state_dict(torch.load(model_path))
