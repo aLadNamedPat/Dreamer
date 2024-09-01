@@ -1,7 +1,9 @@
 # Using the dm_control suite instead of using gym!!!
 import yaml
 from dm_control import suite
-from dm_control import viewer
+# from dm_control import viewer
+import os
+os.environ['MUJOCO_GL'] = 'egl'
 from Dreamer import Dreamer
 import numpy as np
 import matplotlib.pyplot as plt

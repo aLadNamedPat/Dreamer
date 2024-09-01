@@ -59,10 +59,10 @@ class RSSM(nn.Module):
 
         if observation is not None:
             observation = observation.float()
-            print(f"Observation Shape: {observation.shape}")
+            # print(f"Observation Shape: {observation.shape}")
             encoded_observation = self.encoder(observation)
-            print(f"Latent Space Shape: {latent_space.shape}")
-            print(f"Encoded Observation Shape: {encoded_observation.shape}")
+            # print(f"Latent Space Shape: {latent_space.shape}")
+            # print(f"Encoded Observation Shape: {encoded_observation.shape}")
             hidden = self.relu(self.representation_pre(torch.cat([latent_space, encoded_observation], dim=-1)))
             posterior_mean, _posterior_std_dev = torch.chunk(self.representation_post(hidden), 2, dim=-1)
             posterior_std_dev = F.softplus(_posterior_std_dev) + 1e-5
@@ -93,8 +93,8 @@ class RewardModel(nn.Module):
     
     def forward(self, latent_space, sampled_state):
         latent_space = latent_space.reshape(sampled_state.shape)
-        print(latent_space.shape)
-        print(sampled_state.shape)
+        # print(latent_space.shape)
+        # print(sampled_state.shape)
         x = torch.cat([latent_space, sampled_state], dim=-1)
         x = self.relu(self.fw1(x))
         x = self.relu(self.fw2(x))

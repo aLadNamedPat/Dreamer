@@ -126,9 +126,9 @@ class Dreamer(nn.Module):
         prev_state = torch.zeros((self.batch_size, self.RSSM.state_dim))
         prev_latent_space = torch.zeros((self.batch_size, self.RSSM.latent_dim))
         # Forward pass through the RSSM
-        print(f"Dones: {dones}")
-        print(f"actions: {actions.squeeze()}")
-        print(f"states: {prev_state.shape}")
+        # print(f"Dones: {dones}")
+        # print(f"actions: {actions.squeeze()}")
+        # print(f"states: {prev_state.shape}")
 
         latent_spaces, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs, decoded_observations, rewards = self.RSSM(
             prev_state.to(device),
@@ -185,15 +185,15 @@ class Dreamer(nn.Module):
         rewards = self.RSSM(states, actions, beliefs)[-1]
         # rewards = rewards.reshape(self.num_points, self.data_length, -1)
         # This is going to have the value of each state generated, we want to flatten because the 
-        print(f'beliefs: {beliefs.shape}')
-        print(f'states: {states.shape}')
+        # print(f'beliefs: {beliefs.shape}')
+        # print(f'states: {states.shape}')
         values = self.critic(torch.cat([states, beliefs], dim = -1))
         # values = values.reshape(self.num_points, self.data_length, -1)
         values_mean = values.mean
         # This should return the returns for each of the 50 randomly genearted trajectories
 
-        print(f"reward: {rewards.shape}")
-        print(f"values: {values}")
+        # print(f"reward: {rewards.shape}")
+        # print(f"values: {values}")
         returns = self.find_predicted_returns(
             rewards[:, :-1], # Remember that the batch_sample is two dimensional which means that the rewards and values will be two dimensional
             values_mean[:, :-1],
@@ -202,7 +202,7 @@ class Dreamer(nn.Module):
         )
 
         actor_loss = -torch.mean(returns)
-        print(f"returns: {returns}")
+        # print(f"returns: {returns}")
         self.actor_optimizer.zero_grad()
         actor_loss.backward(retain_graph=True)
         self.actor_optimizer.step()
@@ -246,7 +246,7 @@ class Dreamer(nn.Module):
                 observation=obs.to(device)
             )
 
-            print(f"States {states}")
+            # print(f"States {states}")
             if obs is not None:
                 latent_spaces, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs, decoded_observations, rewards = states
             else:
@@ -341,7 +341,7 @@ class Dreamer(nn.Module):
             outputs.append(curr_val)
         outputs = torch.stack(outputs, dim = 1)
         outputs = torch.flip(outputs, [0])
-        print(f"outputs: {outputs}")
+        # print(f"outputs: {outputs}")
         return outputs
     
     def save_models(self, num_timestep):
