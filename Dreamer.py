@@ -225,6 +225,7 @@ class Dreamer(nn.Module):
     def rollout(
         self,
     ):
+        total_rewards = 0
         for t in range(self.batch_train_freq):
             self.num_timesteps += 1
             done = False
@@ -258,8 +259,10 @@ class Dreamer(nn.Module):
             self.replayBuffer.add(self.last_obs, action, timestep.reward, obs, done)
             self.last_obs = obs
 
-            # Log rewards incrementally
-            wandb.log({"reward": timestep.reward, "num_timesteps": self.num_timesteps})
+            total_rewards += timestep.reward
+
+        # Log total rewards after every rollout
+        wandb.log({"total_rewards": total_rewards, "num_timesteps": self.num_timesteps})
 
     def train(
         self,
