@@ -17,7 +17,7 @@ class ConvEncoder(nn.Module):
         self.bn3 = nn.BatchNorm2d(128)
         self.conv256 = nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1)
         self.bn4 = nn.BatchNorm2d(256)
-        self.fc = nn.Linear(256 * 7 * 10, feature_dim)  
+        self.fc = nn.Linear(256 * 96, feature_dim)  
 
     def forward(self, input):
         print(f"Conv Input {input}")
@@ -27,9 +27,7 @@ class ConvEncoder(nn.Module):
         x = self.relu(self.bn2(self.conv64(x)))
         x = self.relu(self.bn3(self.conv128(x)))
         x = self.relu(self.bn4(self.conv256(x)))
-        ## Change dim to feature vector
-        print(f"X Shape {x.shape}")
-        
+        ## Change dim to feature vector        
         x = x.reshape(x.size(0), -1)  
         x = self.fc(x)
         return x
@@ -43,7 +41,7 @@ class ConvDecoder(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
         ## Dec 256 -> 128 -> 64 -> 32 -> output_channels
-        self.fc = nn.Linear(feature_dim, 256 * 4 * 4)
+        self.fc = nn.Linear(feature_dim, 256 * 8 * 12)
         self.deconv256 = nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1)
         self.bn1 = nn.BatchNorm2d(128)
         self.deconv128 = nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1)
@@ -54,7 +52,7 @@ class ConvDecoder(nn.Module):
 
     def forward(self, x):
         x = self.fc(x)
-        x = x.reshape(x.size(0), 256, 4, 4)
+        x = x.reshape(x.size(0), 256, 8, 12)
         x = self.relu(self.bn1(self.deconv256(x)))
         x = self.relu(self.bn2(self.deconv128(x)))
         x = self.relu(self.bn3(self.deconv64(x)))

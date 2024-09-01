@@ -44,13 +44,14 @@ def run(configurations, dreamer : Dreamer):
 
         print(time_step)
         # Render and display the current pixel observation
-               
+
         plt.imshow(obs)
         plt.axis('off')
         plt.pause(0.01)  # Small pause to allow image display
  
         
 if __name__ == '__main__':
+    torch.autograd.set_detect_anomaly(True)
     config = load_config('config.yaml')
 
     env = suite.load(domain_name=config['env']['domain_name'], task_name=config['env']['task_name'])

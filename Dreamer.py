@@ -7,8 +7,18 @@ from torch.distributions.multivariate_normal import MultivariateNormal
 import wandb
 import pickle
 import gzip
+import torch.nn.functional as F
 
 device = torch.device("cpu")
+
+wandb.init(
+    project="Dreamer",
+    config={
+    "learning_rate": 0.001,
+    # Add other hyperparameters here
+    },
+    reinit=True,
+)
 
 class Dreamer(nn.Module):
     def __init__(
@@ -78,28 +88,30 @@ class Dreamer(nn.Module):
     # Latent is a M x N vector representing the latent at each different index
         x, y = posterior.shape
 
-        imagined_state = posterior.reshape(x * y, -1)
-        imagined_latent = latents.reshape(x * y, -1)
+        # imagined_state = posterior.reshape(x * y, -1)
+        # imagined_latent = latents.reshape(x * y, -1)
+        imagined_state = posterior
+        imagined_latent = latents
+        action = self.actor(torch.cat([imagined_state, imagined_latent], -1))
+        # print(f"Action Reshape {action.reshape(x, y, -1)}")
 
-        action = self.actor(torch.cat([imagined_state, imagined_belief]).to(device=device))
-        print(f"Action Reshape {action.reshape(x, y, -1)}")
         latent_list = [imagined_latent]
         state_list = [imagined_state]
         action_list = [action]
 
         for j in range(horizon):
-            state = self.RSSM(imagined_state, action, imagined_belief)
-            imagined_state, imagined_belief = state[0], state[1]
-            action = self.actor(torch.cat([imagined_state, imagined_belief]).to(device=device))
-            action.reshape(x, y, -1)
+            state = self.RSSM(imagined_state, action, imagined_latent)
+            imagined_state, imagined_latent = state[0], state[1]
+            action = self.actor(torch.cat([imagined_state, imagined_latent], -1))
+            # action.reshape(x, y, -1)
             latent_list.append(imagined_latent)
             state_list.append(imagined_state)
             action_list.append(action)
 
         
-        latent_list = torch.stack(latent_list, dim = 0).to(device = device)
-        state_list = torch.stack(state_list, dim = 0).to(device = device)
-        action_list = torch.stack(action_list, dim = 0).to(device = device)
+        latent_list = torch.stack(latent_list, dim = 0)
+        state_list = torch.stack(state_list, dim = 0)
+        action_list = torch.stack(action_list, dim = 0)
 
         return latent_list, state_list, action_list
 
@@ -109,16 +121,18 @@ class Dreamer(nn.Module):
 
         # Sample a batch of experiences from the replay buffer
         states, actions, rewards_real, next_states, dones = self.replayBuffer.sample(self.batch_size, self.sample_steps, random_flag=True)
-        dones = dones.reshape(dones.shape[0], 1)
+        dones = dones.reshape(dones.shape[0], 1).float()
         # Get the initial state and latent space
         prev_state = torch.zeros((self.batch_size, self.RSSM.state_dim))
         prev_latent_space = torch.zeros((self.batch_size, self.RSSM.latent_dim))
-        
         # Forward pass through the RSSM
         print(f"Dones: {dones}")
+        print(f"actions: {actions.squeeze()}")
+        print(f"states: {prev_state.shape}")
+
         latent_spaces, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs, decoded_observations, rewards = self.RSSM(
             prev_state, 
-            actions, 
+            actions.squeeze().float(),
             prev_latent_space, 
             nonterminals=torch.logical_not(dones), 
             observation=states
@@ -126,7 +140,7 @@ class Dreamer(nn.Module):
         
         # Calculate the MSE loss for observation and decoded observation
         mse_loss = nn.MSELoss()
-        observation_loss = mse_loss(states, decoded_observations)
+        observation_loss = mse_loss(states.float(), decoded_observations)
         
         # Calculate the KL divergence loss between the prior and posterior distributions
         kl_loss = torch.distributions.kl_divergence(
@@ -134,14 +148,14 @@ class Dreamer(nn.Module):
             torch.distributions.Normal(prior_means, prior_std_devs)
         ).mean()
 
-        beliefs, states, actions = self.latent_imagine(prev_state, posterior_means, 15)
+        beliefs, states, actions = self.latent_imagine(prev_state, posterior_means, self.data_length)
         ## TODO: Calculate the following properly!!!!
         # Calculate the reward loss
-        reward_loss = mse_loss(rewards_real, rewards)
-        
+
+        reward_loss = mse_loss(rewards_real.float(), rewards.squeeze()).float()
         # Total loss
         total_loss = observation_loss + kl_loss + reward_loss
-        
+
         # Backpropagation and optimization
         self.RSSM_optimizer.zero_grad()
         total_loss.backward()
@@ -163,32 +177,38 @@ class Dreamer(nn.Module):
             self,
             beliefs,
             states,
+            actions,
         ):
 
         # Generates 50 random datapoints of length 50
         # This is going to have the reward of each state generated
-        datapoints = torch.cat([beliefs, states], dim = 0)
-        rewards = self.RSSM(datapoints.reshape(self.num_points * self.data_length, -1))[-1]
-        rewards = rewards.reshape(self.num_points, self.data_length, -1)
+        rewards = self.RSSM(states, actions, beliefs)[-1]
+        # rewards = rewards.reshape(self.num_points, self.data_length, -1)
         # This is going to have the value of each state generated, we want to flatten because the 
-        values = self.critic(datapoints.reshape(self.num_points * self.data_length, -1))
-        values = values.reshape(self.num_points, self.data_length, -1)
-
+        print(f'beliefs: {beliefs.shape}')
+        print(f'states: {states.shape}')
+        values = self.critic(torch.cat([states, beliefs], dim = -1))
+        # values = values.reshape(self.num_points, self.data_length, -1)
+        values_mean = values.mean
         # This should return the returns for each of the 50 randomly genearted trajectories
+
+        print(f"reward: {rewards.shape}")
+        print(f"values: {values}")
         returns = self.find_predicted_returns(
             rewards[:, :-1], # Remember that the batch_sample is two dimensional which means that the rewards and values will be two dimensional
-            values[:, :-1],
+            values_mean[:, :-1],
             last_reward = rewards[:, -1],
             _lambda = self.lambda_
         )
 
-        actor_loss = -torch.mean(self.find_predicted_returns()) #For actor loss it's enough to minimize the negative returns -> minimizing negative returns = maximizing positive returns
+        actor_loss = -torch.mean(returns)
+        print(f"returns: {returns}")
         self.actor_optimizer.zero_grad()
-        actor_loss.backwards()
+        actor_loss.backward(retain_graph=True)
         self.actor_optimizer.step()
 
         critic_loss = -torch.mean(values.log_prob(returns))# For value loss (critic loss), we want to find the log probability of finding that returns for the given value predicted
-        critic_loss.backwards()
+        critic_loss.backward()
         self.critic_optimizer.step()
 
         # Log losses to wandb
@@ -215,8 +235,8 @@ class Dreamer(nn.Module):
                 action = action.reshape(1, action.shape[0])
             print("Action shape: ", action.shape)
             timestep = self.env.step(action)
-            obs = torch.tensor(self.env.physics.render(camera_id=0, height=120, width=160).copy())
-            obs = obs.reshape(1, obs.shape[0], obs.shape[1], obs.shape[2])
+            obs = torch.tensor(self.env.physics.render(camera_id=0, height=128, width=192).copy())
+            obs = obs.reshape(1, obs.shape[0], obs.shape[1], obs.shape[2]).detach()
             if (t == self.batch_train_freq - 1):
                 done = True
             
@@ -250,8 +270,8 @@ class Dreamer(nn.Module):
         self.num_points = num_points
         self.data_length = data_length
         obs = self.env.reset()
-        render = self.env.physics.render(camera_id=0, height=120, width=160)
-        self.last_obs = torch.tensor(render.copy()).to(device)
+        render = self.env.physics.render(camera_id=0, height=128, width=192)
+        self.last_obs = torch.tensor(render.copy())
         self.prev_state = torch.zeros((1, self.RSSM.state_dim))
         self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim))
 
@@ -263,7 +283,10 @@ class Dreamer(nn.Module):
             for i in range(update_steps):
                 beliefs, states, actions, reward_loss, kl_loss, decoder_loss = self.model_update()
                 # The data that the agent update receives should be the encoded space already to save memory
-                actor_loss, critic_loss = self.agent_update(beliefs, states)
+                beliefs = beliefs.detach()
+                states = states.detach()
+                actions = actions.detach()
+                actor_loss, critic_loss = self.agent_update(beliefs, states, actions)
                 # Log training progress to wandb
                 wandb.log({
                     "num_timesteps": self.num_timesteps,
@@ -275,8 +298,8 @@ class Dreamer(nn.Module):
                 })
 
             obs = self.env.reset()
-            render = self.env.physics.render(camera_id=0, height=120, width=160)
-            self.last_obs = torch.tensor(render.copy()).to(device)
+            render = self.env.physics.render(camera_id=0, height=128, width=192)
+            self.last_obs = torch.tensor(render.copy())
             self.prev_state = torch.zeros((1, self.RSSM.state_dim))
             self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim))
 
@@ -293,9 +316,9 @@ class Dreamer(nn.Module):
         if (self.num_timesteps < self.sample_steps):
             return np.random.uniform(low=-1.0, high=1.0, size=self.env.action_spec().shape)
         elif not predict_mode:
-            return self.actor(pixels) + 0.3 * torch.randn_like(self.env.action_spec().shape)
+            return self.actor(pixels) + 0.3 * torch.randn_like(self.env.action_spec().shape).detach()
         else:
-            return self.actor(pixels)
+            return self.actor(pixels).detach()
 
 
 # Help from https://github.com/juliusfrost/dreamer-pytorch/blob/main/dreamer/algos/dreamer_algo.py for finding returns
@@ -309,20 +332,18 @@ class Dreamer(nn.Module):
         last_reward,
         _lambda
     ):
-        # Need to first calculate the next values that since the pred_value are from the same state as the pred_rewards
-        next_vals = pred_values[1:] # Might need to take the mean of this
-
         # Next, we need to calculate the predicted targets of the next states (This is just current_reward + (1 - lambda) * gamma * next_value)        
-        targets = pred_rewards[:-1] + (1 - _lambda) * self.gamma * next_vals
-
+        targets = pred_rewards + (1 - _lambda) * self.gamma * pred_values
         # Since we are using TD-lambda for finding the returns, this essentially correspond to the point that the returns on to 
-        outputs = []
         curr_val = last_reward
+        outputs = [curr_val]
 
-        for i in range(len(pred_rewards) - 1, -1):
-            curr_val = targets[i] + _lambda * self.gamma[i] * curr_val
+        for i in range(pred_rewards.shape[1] - 1, -1, -1):
+            curr_val = targets[:, i] + _lambda * self.gamma * curr_val
             outputs.append(curr_val)
-
+        outputs = torch.stack(outputs, dim = 1)
+        outputs = torch.flip(outputs, [0])
+        print(f"outputs: {outputs}")
         return outputs
     
     def save_models(self, num_timestep):
@@ -353,15 +374,21 @@ class DenseConnections(nn.Module):
         self.action_model = action_model
 
     def forward(self, input : torch.Tensor):
-        x = nn.ELU(self.l1(input))
-        x = nn.ELU(self.l2(x))
-        if not self.action_model: # For the value model
+        x = nn.ELU()(self.l1(input))
+        x = nn.ELU()(self.l2(x))
+        if not self.action_model:  # For the value model
             mean, std = torch.chunk(self.l3(x), 2, dim=-1)
-            cov_mat = torch.diagonal(std)
+            
+            # Ensure std is positive by applying softplus or another positive activation
+            std = F.softplus(std) + 1e-6  # Add epsilon to avoid zero std
+            
+            # Construct a diagonal covariance matrix from std
+            cov_mat = torch.diag_embed(std**2)
+            
             return MultivariateNormal(mean, cov_mat)
         else: # For the actor model
             mean, std = torch.chunk(self.l3(x), 2, dim = -1)
-            action = torch.tanh(mean + std * torch.randn_like(mean))
+            action = torch.tanh(mean + std.detach() * torch.randn_like(mean))
             return action
 
     def save_model(self, num_steps):
