@@ -14,11 +14,11 @@ camera_id = 0
 # Reset the environment to get the initial observation
 obs = env.reset()
 
-print(obs)
+# print(obs)
 # Extract pixel-based observation (rendered image from the environment)
 pixels = env.physics.render(camera_id=camera_id, height=240, width=320)
 
-print(pixels, type(pixels))
+# print(pixels, type(pixels))
 # Display the pixels as an image using matplotlib
 plt.imshow(pixels)
 plt.title("Initial Observation (Pixel-Based)")

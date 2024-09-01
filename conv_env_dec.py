@@ -8,7 +8,7 @@ class ConvEncoder(nn.Module):
         self.relu = nn.ReLU()
         
         ## We choose an enc of input channels -> 32 -> 64 -> 128 -> 256
-        print("input channels: ", input_channels)
+        # print("input channels: ", input_channels)
         self.conv32 = nn.Conv2d(input_channels, 32, kernel_size=4, stride=2, padding=1)
         self.bn1 = nn.BatchNorm2d(32)
         self.conv64 = nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1)
@@ -20,8 +20,8 @@ class ConvEncoder(nn.Module):
         self.fc = nn.Linear(256 * 96, feature_dim)  
 
     def forward(self, input):
-        print(f"Conv Input {input}")
-        print(f"Input shape: {input.shape}")
+        # print(f"Conv Input {input}")
+        # print(f"Input shape: {input.shape}")
         input = input.permute(0, 3, 1, 2)  
         x = self.relu(self.bn1(self.conv32(input)))
         x = self.relu(self.bn2(self.conv64(x)))

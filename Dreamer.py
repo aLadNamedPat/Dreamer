@@ -258,6 +258,9 @@ class Dreamer(nn.Module):
             self.replayBuffer.add(self.last_obs, action, timestep.reward, obs, done)
             self.last_obs = obs
 
+            # Log rewards incrementally
+            wandb.log({"reward": timestep.reward, "num_timesteps": self.num_timesteps})
+
     def train(
         self,
         timesteps : int,
@@ -274,10 +277,16 @@ class Dreamer(nn.Module):
         self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim))
 
         self.num_timesteps = 0
+        total_rewards = 0
 
         while (self.num_timesteps < timesteps):
             # wandb.init(project="dreamer_training", reinit=True)
             self.rollout()
+            total_actor_loss = 0
+            total_critic_loss = 0
+            total_reward_loss = 0
+            total_kl_loss = 0
+            total_decoder_loss = 0
             for i in range(update_steps):
                 beliefs, states, actions, reward_loss, kl_loss, decoder_loss = self.model_update()
                 # The data that the agent update receives should be the encoded space already to save memory
@@ -285,6 +294,11 @@ class Dreamer(nn.Module):
                 states = states.detach()
                 actions = actions.detach()
                 actor_loss, critic_loss = self.agent_update(beliefs, states, actions)
+                total_actor_loss += actor_loss.item()
+                total_critic_loss += critic_loss.item()
+                total_reward_loss += reward_loss.item()
+                total_kl_loss += kl_loss.item()
+                total_decoder_loss += decoder_loss.item()
                 # Log training progress to wandb
                 wandb.log({
                     "num_timesteps": self.num_timesteps,
@@ -294,6 +308,14 @@ class Dreamer(nn.Module):
                     "observation_loss" : decoder_loss,
                     "kl_loss" : kl_loss.item()
                 })
+
+            avg_actor_loss = total_actor_loss / update_steps
+            avg_critic_loss = total_critic_loss / update_steps
+            avg_reward_loss = total_reward_loss / update_steps
+            avg_kl_loss = total_kl_loss / update_steps
+            avg_decoder_loss = total_decoder_loss / update_steps
+
+            print(f"Timestep: {self.num_timesteps}, Avg Actor Loss: {avg_actor_loss}, Avg Critic Loss: {avg_critic_loss}, Avg Reward Loss: {avg_reward_loss}, Avg KL Loss: {avg_kl_loss}, Avg Decoder Loss: {avg_decoder_loss}")
 
             obs = self.env.reset()
             render = self.env.physics.render(camera_id=0, height=128, width=192)
