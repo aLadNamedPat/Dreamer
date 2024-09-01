@@ -9,7 +9,7 @@ import pickle
 import gzip
 import torch.nn.functional as F
 
-device = torch.device("cpu")
+device = torch.device("cuda")
 
 wandb.init(
     project="Dreamer",
@@ -57,14 +57,14 @@ class Dreamer(nn.Module):
             self.state_dims + self.latent_dims,
             self.action_space.shape[0],
             action_model = True
-        )
+        ).to(device)
 
         # Critic only needs to output the value of being at a certain latent dim (no sampling required)
         self.critic = DenseConnections(
             self.state_dims + self.latent_dims,
             1,
             action_model = False
-        )
+        ).to(device)
 
         # def __init__(self, state_dim, action_dim, observation_dim, o_feature_dim, latent_dim, reward_dim):
         self.RSSM = RSSM(
@@ -74,7 +74,7 @@ class Dreamer(nn.Module):
             o_feature_dim=self.o_feature_dim,
             latent_dim=self.latent_dims,
             reward_dim=self.reward_dim
-        )
+        ).to(device)
 
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr =8e-5)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=8e-5)
@@ -131,16 +131,16 @@ class Dreamer(nn.Module):
         print(f"states: {prev_state.shape}")
 
         latent_spaces, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs, decoded_observations, rewards = self.RSSM(
-            prev_state, 
-            actions.squeeze().float(),
-            prev_latent_space, 
-            nonterminals=torch.logical_not(dones), 
-            observation=states
+            prev_state.to(device),
+            actions.squeeze().float().to(device),
+            prev_latent_space.to(device), 
+            nonterminals=torch.logical_not(dones).to(device), 
+            observation=states.to(device)
         )
         
         # Calculate the MSE loss for observation and decoded observation
         mse_loss = nn.MSELoss()
-        observation_loss = mse_loss(states.float(), decoded_observations)
+        observation_loss = mse_loss(states.float().to(device), decoded_observations)
         
         # Calculate the KL divergence loss between the prior and posterior distributions
         kl_loss = torch.distributions.kl_divergence(
@@ -148,11 +148,11 @@ class Dreamer(nn.Module):
             torch.distributions.Normal(prior_means, prior_std_devs)
         ).mean()
 
-        beliefs, states, actions = self.latent_imagine(prev_state, posterior_means, self.data_length)
+        beliefs, states, actions = self.latent_imagine(prev_state.to(device), posterior_means.to(device), self.data_length)
         ## TODO: Calculate the following properly!!!!
         # Calculate the reward loss
 
-        reward_loss = mse_loss(rewards_real.float(), rewards.squeeze()).float()
+        reward_loss = mse_loss(rewards_real.float().to(device), rewards.squeeze()).float()
         # Total loss
         total_loss = observation_loss + kl_loss + reward_loss
 
@@ -228,12 +228,10 @@ class Dreamer(nn.Module):
         for t in range(self.batch_train_freq):
             self.num_timesteps += 1
             done = False
-            action = self.sample_action(torch.cat([self.prev_state, self.prev_latent_space]))
+            action = self.sample_action(torch.cat([self.prev_state, self.prev_latent_space]).to(device))
             action = torch.tensor(action, dtype=torch.float32)
-            print(f"Action : {action}")
             if action.dim() == 1:
                 action = action.reshape(1, action.shape[0])
-            print("Action shape: ", action.shape)
             timestep = self.env.step(action)
             obs = torch.tensor(self.env.physics.render(camera_id=0, height=128, width=192).copy())
             obs = obs.reshape(1, obs.shape[0], obs.shape[1], obs.shape[2]).detach()
@@ -241,11 +239,11 @@ class Dreamer(nn.Module):
                 done = True
             
             states = self.RSSM(
-                self.prev_state, 
-                action, 
-                self.prev_latent_space, 
+                self.prev_state.to(device), 
+                action.to(device), 
+                self.prev_latent_space.to(device), 
                 nonterminals=1-done, 
-                observation=obs
+                observation=obs.to(device)
             )
 
             print(f"States {states}")
