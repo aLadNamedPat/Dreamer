@@ -11,9 +11,11 @@ dreamer:
   gamma: 0.99
   lambda_: 0.95
   batch_size: 50
-  batch_train_freq: 50
+  batch_train_freq: 1000
   buffer_size: 100000000
-  sample_steps: 1000
+  sample_steps: 50
+  steps_of_sampling: 5000
+  horizon: 15
 
 training:
   timesteps: 10000

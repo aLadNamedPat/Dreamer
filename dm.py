@@ -25,21 +25,24 @@ plt.title("Initial Observation (Pixel-Based)")
 plt.axis('off')
 plt.show()
 
+i = 0
 # Interaction Loop (e.g., 100 steps)
-for _ in range(100):
-    # Sample a random action from the action space
+while True:   
+ # Sample a random action from the action space
     action = np.random.uniform(low=-1.0, high=1.0, size=env.action_spec().shape)
-    
+    i += 1
     # Take a step in the environment
     time_step = env.step(action)
     
-    print(time_step)
+    print(time_step.last())
     # Render and display the current pixel observation
     pixels = env.physics.render(camera_id=camera_id, height=240, width=320)
-    
-    plt.imshow(pixels)
-    plt.axis('off')
-    plt.pause(0.01)  # Small pause to allow image display
+    if time_step.last():
+        print(i)
+    #     break
+    # plt.imshow(pixels)
+    # plt.axis('off')
+    # plt.pause(0.01)  # Small pause to allow image display
 
 # If you want to launch an interactive viewer, you can use the built-in viewer from dm_control
 # viewer.launch(env)

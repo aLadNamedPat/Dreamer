@@ -34,7 +34,9 @@ class Dreamer(nn.Module):
             batch_size : int = 50,
             batch_train_freq : int = 50,
             buffer_size : int = 100000000,
-            sample_steps : int = 1000,
+            sample_steps : int = 50,
+            steps_of_sampling : int = 1000,
+            horizon : int = 15,
             ):
         super(Dreamer, self).__init__()
         
@@ -51,6 +53,8 @@ class Dreamer(nn.Module):
         self.batch_train_freq = batch_train_freq
         self.replayBuffer = Buffer(buffer_size)
         self.sample_steps = sample_steps
+        self.steps_of_sampling = steps_of_sampling
+        self.horizon = horizon
 
         # Actor needs to output the action to take at a standard deviation
         self.actor = DenseConnections(
@@ -99,7 +103,7 @@ class Dreamer(nn.Module):
         state_list = [imagined_state]
         action_list = [action]
 
-        for j in range(horizon):
+        for _ in range(horizon):
             state = self.RSSM(imagined_state, action, imagined_latent)
             imagined_state, imagined_latent = state[0], state[1]
             action = self.actor(torch.cat([imagined_state, imagined_latent], -1))
@@ -107,7 +111,6 @@ class Dreamer(nn.Module):
             latent_list.append(imagined_latent)
             state_list.append(imagined_state)
             action_list.append(action)
-
         
         latent_list = torch.stack(latent_list, dim = 0)
         state_list = torch.stack(state_list, dim = 0)
@@ -121,7 +124,8 @@ class Dreamer(nn.Module):
 
         # Sample a batch of experiences from the replay buffer
         states, actions, rewards_real, next_states, dones = self.replayBuffer.sample(self.batch_size, self.sample_steps, random_flag=True)
-        dones = dones.reshape(dones.shape[0], 1).float()
+        print(dones.shape)
+        dones = dones.reshape(dones.shape[0], dones.shape[1], 1).float()
         # Get the initial state and latent space
         prev_state = torch.zeros((self.batch_size, self.RSSM.state_dim))
         prev_latent_space = torch.zeros((self.batch_size, self.RSSM.latent_dim))
@@ -148,7 +152,7 @@ class Dreamer(nn.Module):
             torch.distributions.Normal(prior_means, prior_std_devs)
         ).mean()
 
-        beliefs, states, actions = self.latent_imagine(prev_state.to(device), posterior_means.to(device), self.data_length)
+        beliefs, states, actions = self.latent_imagine(prev_state.to(device), posterior_means.to(device), self.horizon)
         ## TODO: Calculate the following properly!!!!
         # Calculate the reward loss
 
@@ -187,26 +191,33 @@ class Dreamer(nn.Module):
         # This is going to have the value of each state generated, we want to flatten because the 
         # print(f'beliefs: {beliefs.shape}')
         # print(f'states: {states.shape}')
-        values = self.critic(torch.cat([states, beliefs], dim = -1))
+        values = self.critic(torch.cat([states, beliefs], dim = -1).detach())
         # values = values.reshape(self.num_points, self.data_length, -1)
-        values_mean = values.mean
+
         # This should return the returns for each of the 50 randomly genearted trajectories
 
+        discounts = self.gamma * torch.ones_like(torch.cat([states, beliefs], dim = -1).detach())
+        discount_arr = torch.cat([torch.ones_like(discounts[:1]), discounts[1:]])
+        discount = torch.cumprod(discount_arr[:-1], 0)
+        
         # print(f"reward: {rewards.shape}")
         # print(f"values: {values}")
         returns = self.find_predicted_returns(
             rewards[:, :-1], # Remember that the batch_sample is two dimensional which means that the rewards and values will be two dimensional
-            values_mean[:, :-1],
+            values.mean[:, :-1],
             last_reward = rewards[:, -1],
             _lambda = self.lambda_
         )
-
-        actor_loss = -torch.mean(returns)
+        
+        actor_loss = -torch.mean(discount * returns)
         # print(f"returns: {returns}")
         self.actor_optimizer.zero_grad()
         actor_loss.backward(retain_graph=True)
         self.actor_optimizer.step()
 
+        # with torch.no_grad():
+        #     values = self.critic(torch.cat([states, beliefs], dim = -1)[:,:-1])
+        
         critic_loss = -torch.mean(values.log_prob(returns))# For value loss (critic loss), we want to find the log probability of finding that returns for the given value predicted
         critic_loss.backward()
         self.critic_optimizer.step()
@@ -228,22 +239,19 @@ class Dreamer(nn.Module):
         total_rewards = 0
         for t in range(self.batch_train_freq):
             self.num_timesteps += 1
-            done = False
-            action = self.sample_action(torch.cat([self.prev_state, self.prev_latent_space]).to(device))
+            action = self.sample_action(torch.cat([self.prev_state, self.prev_latent_space], dim = -1).to(device))
             action = torch.tensor(action, dtype=torch.float32)
             if action.dim() == 1:
                 action = action.reshape(1, action.shape[0])
-            timestep = self.env.step(action)
+            timestep = self.env.step(action.cpu())
             obs = torch.tensor(self.env.physics.render(camera_id=0, height=128, width=192).copy())
             obs = obs.reshape(1, obs.shape[0], obs.shape[1], obs.shape[2]).detach()
-            if (t == self.batch_train_freq - 1):
-                done = True
             
             states = self.RSSM(
                 self.prev_state.to(device), 
                 action.to(device), 
                 self.prev_latent_space.to(device), 
-                nonterminals=1-done, 
+                nonterminals=1-timestep.last(), 
                 observation=obs.to(device)
             )
 
@@ -256,7 +264,7 @@ class Dreamer(nn.Module):
             self.prev_state = posterior_states
             self.prev_latent_space = latent_spaces
 
-            self.replayBuffer.add(self.last_obs, action, timestep.reward, obs, done)
+            self.replayBuffer.add(self.last_obs, action, timestep.reward, obs, timestep.last())
             self.last_obs = obs
 
             total_rewards += timestep.reward
@@ -281,6 +289,18 @@ class Dreamer(nn.Module):
 
         self.num_timesteps = 0
         total_rewards = 0
+
+        while(self.num_timesteps < self.steps_of_sampling):
+            self.rollout()
+            obs = self.env.reset()
+            render = self.env.physics.render(camera_id=0, height=128, width=192)
+            self.last_obs = torch.tensor(render.copy())
+
+        obs = self.env.reset()
+        render = self.env.physics.render(camera_id=0, height=128, width=192)
+        self.last_obs = torch.tensor(render.copy())
+        self.prev_state = torch.zeros((1, self.RSSM.state_dim))
+        self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim))
 
         while (self.num_timesteps < timesteps):
             # wandb.init(project="dreamer_training", reinit=True)
@@ -336,10 +356,17 @@ class Dreamer(nn.Module):
         pixels : torch.Tensor,
         predict_mode : bool = False
     ) -> torch.Tensor:
-        if (self.num_timesteps < self.sample_steps):
-            return np.random.uniform(low=-1.0, high=1.0, size=self.env.action_spec().shape)
+        if (self.num_timesteps < self.steps_of_sampling):
+            action_spec = self.env.action_spec()
+            random_action = np.random.uniform(
+                low=action_spec.minimum, 
+                high=action_spec.maximum, 
+                size=action_spec.shape
+            )
+            return random_action
         elif not predict_mode:
-            return self.actor(pixels) + 0.3 * torch.randn_like(self.env.action_spec().shape).detach()
+            predict = self.actor(pixels).detach()
+            return predict + 0.3 * torch.randn_like(predict).detach()
         else:
             return self.actor(pixels).detach()
 
@@ -356,19 +383,19 @@ class Dreamer(nn.Module):
         _lambda
     ):
         # Next, we need to calculate the predicted targets of the next states (This is just current_reward + (1 - lambda) * gamma * next_value)        
-        targets = pred_rewards + (1 - _lambda) * self.gamma * pred_values
+        targets = pred_rewards + (1 - _lambda) * pred_values
         # Since we are using TD-lambda for finding the returns, this essentially correspond to the point that the returns on to 
         curr_val = last_reward
-        outputs = [curr_val]
+        outputs = []
 
         for i in range(pred_rewards.shape[1] - 1, -1, -1):
-            curr_val = targets[:, i] + _lambda * self.gamma * curr_val
+            curr_val = targets[:, i] + _lambda * curr_val
             outputs.append(curr_val)
         outputs = torch.stack(outputs, dim = 1)
         outputs = torch.flip(outputs, [0])
         # print(f"outputs: {outputs}")
         return outputs
-    
+        
     def save_models(self, num_timestep):
         self.actor.save_model(num_timestep)
         self.critic.save_model(num_timestep)

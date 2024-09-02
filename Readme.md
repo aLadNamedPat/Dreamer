@@ -11,4 +11,5 @@
 
 
 ### TO DO
-Train model
+Debug error with fixed episode length that returns done and some phases
+done is not included into calculating the reward structure which can be weird

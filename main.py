@@ -69,7 +69,9 @@ if __name__ == '__main__':
         batch_size=config['dreamer']['batch_size'],
         batch_train_freq=config['dreamer']['batch_train_freq'],
         buffer_size=config['dreamer']['buffer_size'],
-        sample_steps=config['dreamer']['sample_steps']
+        sample_steps=config['dreamer']['sample_steps'],
+        steps_of_sampling=config['dreamer']['steps_of_sampling'],
+        horizon = config['dreamer']['horizon']
     )
 
     timesteps = config['training']['timesteps']

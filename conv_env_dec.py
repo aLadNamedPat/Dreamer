@@ -38,7 +38,7 @@ class ConvDecoder(nn.Module):
         self.relu = nn.ReLU()
 
         ## ! Is sigmoid the correct activation function for this? 
-        self.sigmoid = nn.Sigmoid()
+        # self.sigmoid = nn.Sigmoid()
 
         ## Dec 256 -> 128 -> 64 -> 32 -> output_channels
         self.fc = nn.Linear(feature_dim, 256 * 8 * 12)
@@ -56,6 +56,6 @@ class ConvDecoder(nn.Module):
         x = self.relu(self.bn1(self.deconv256(x)))
         x = self.relu(self.bn2(self.deconv128(x)))
         x = self.relu(self.bn3(self.deconv64(x)))
-        x = self.sigmoid(self.deconv32(x))
+        x = self.relu(self.deconv32(x))
         x = x.permute(0, 2, 3, 1)
         return x
