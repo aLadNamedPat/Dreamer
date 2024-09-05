@@ -123,10 +123,13 @@ class Dreamer(nn.Module):
     def model_update(self):
 
         # Sample a batch of experiences from the replay buffer
-        states, actions, rewards_real, next_states, dones = self.replayBuffer.sample(self.batch_size, self.sample_steps, random_flag=True)
+        states, actions, rewards_real, next_states, dones = self.replayBuffer.sample(self.batch_size, self.sample_steps)
+        print(states.shape)
+        print(actions.shape)
+        print(rewards_real.shape)
         print(dones.shape)
-        dones = dones.reshape(dones.shape[0], dones.shape[1], 1).float()
         # Get the initial state and latent space
+
         prev_state = torch.zeros((self.batch_size, self.RSSM.state_dim))
         prev_latent_space = torch.zeros((self.batch_size, self.RSSM.latent_dim))
         # Forward pass through the RSSM
@@ -312,6 +315,7 @@ class Dreamer(nn.Module):
             total_decoder_loss = 0
             for i in range(update_steps):
                 beliefs, states, actions, reward_loss, kl_loss, decoder_loss = self.model_update()
+
                 # The data that the agent update receives should be the encoded space already to save memory
                 beliefs = beliefs.detach()
                 states = states.detach()

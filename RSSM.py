@@ -36,7 +36,7 @@ class RSSM(nn.Module):
         latent_space = prev_latent_space
         prior_state = prev_state
         posterior_state = prev_state
-
+        
         if observation is None:
             state = prior_state
         else:
@@ -44,9 +44,12 @@ class RSSM(nn.Module):
 
         if nonterminals is not None:
             state = state * nonterminals
-            
-        latent_space = self.rnn(state.view(-1, state.size(-1)), latent_space.view(-1, latent_space.size(-1)))
         
+        print(state.shape)
+        print(latent_space.shape)
+        # latent_space = self.rnn(state.view(-1, state.size(-1)), latent_space.view(-1, latent_space.size(-1)))
+        latent_space = self.rnn(state, latent_space)
+
         ## TODO : Do we need to reduce the size of the state
         
         # state = state.view(-1)
