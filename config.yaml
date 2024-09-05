@@ -5,7 +5,6 @@ env:
 dreamer:
   state_dims: 30
   latent_dims: 30
-  observation_dim: [120, 160]
   o_feature_dim: 1024
   reward_dim: 1
   gamma: 0.99
