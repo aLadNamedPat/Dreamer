@@ -9,7 +9,7 @@ import pickle
 import gzip
 import torch.nn.functional as F
 
-device = torch.device("cuda")
+device = torch.device("cpu")
 
 wandb.init(
     project="Dreamer",
@@ -26,7 +26,6 @@ class Dreamer(nn.Module):
             env,
             state_dims : int,
             latent_dims : int,
-            observation_dim : int,
             o_feature_dim : int,
             reward_dim : int,
             gamma : float  = 0.99,
@@ -44,7 +43,6 @@ class Dreamer(nn.Module):
         self.action_space = env.action_spec()
         self.state_dims = state_dims
         self.latent_dims = latent_dims
-        self.observation_dim = observation_dim
         self.o_feature_dim = o_feature_dim
         self.reward_dim = reward_dim
         self.gamma = gamma
@@ -74,7 +72,6 @@ class Dreamer(nn.Module):
         self.RSSM = RSSM(
             state_dim=self.state_dims,
             action_dim=self.action_space,
-            observation_dim=self.observation_dim,
             o_feature_dim=self.o_feature_dim,
             latent_dim=self.latent_dims,
             reward_dim=self.reward_dim
@@ -104,7 +101,7 @@ class Dreamer(nn.Module):
         action_list = [action]
 
         for _ in range(horizon):
-            state = self.RSSM(imagined_state, action, imagined_latent)
+            state = self.RSSM(imagined_state, action_list, imagined_latent)
             imagined_state, imagined_latent = state[0], state[1]
             action = self.actor(torch.cat([imagined_state, imagined_latent], -1))
             # action.reshape(x, y, -1)
@@ -139,7 +136,7 @@ class Dreamer(nn.Module):
             actions.squeeze().float().to(device),
             prev_latent_space.to(device), 
             nonterminals=torch.logical_not(dones).to(device), 
-            observation=states.to(device)
+            observations=states.to(device)
         )
         
         # Calculate the MSE loss for observation and decoded observation
@@ -246,13 +243,13 @@ class Dreamer(nn.Module):
             timestep = self.env.step(action.cpu())
             obs = torch.tensor(self.env.physics.render(camera_id=0, height=128, width=192).copy())
             obs = obs.reshape(1, obs.shape[0], obs.shape[1], obs.shape[2]).detach()
-            
+            action = action.reshape(1, action.shape[0], action.shape[1])
             states = self.RSSM(
                 self.prev_state.to(device), 
                 action.to(device), 
                 self.prev_latent_space.to(device), 
                 nonterminals=1-timestep.last(), 
-                observation=obs.to(device)
+                observations=obs.to(device)
             )
 
             # print(f"States {states}")
