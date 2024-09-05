@@ -16,7 +16,7 @@ obs = env.reset()
 
 # print(obs)
 # Extract pixel-based observation (rendered image from the environment)
-pixels = env.physics.render(camera_id=camera_id, height=240, width=320)
+pixels = env.physics.render(camera_id=camera_id, height=480, width=640)
 
 # print(pixels, type(pixels))
 # Display the pixels as an image using matplotlib
