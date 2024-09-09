@@ -22,8 +22,8 @@ class ConvEncoder(nn.Module):
     def forward(self, input):
         print(f"Conv Input {input}")
         print(f"Input shape: {input.shape}")
-        input = input.reshape(1, input.shape[0], input.shape[1], input.shape[2])  
-        input = input.permute(0, 3, 1, 2)  
+        # input = input.reshape(1, input.shape[0], input.shape[1], input.shape[2])  
+        input = input.permute(0, 3, 1, 2)
         x = self.relu(self.bn1(self.conv32(input)))
         x = self.relu(self.bn2(self.conv64(x)))
         x = self.relu(self.bn3(self.conv128(x)))
