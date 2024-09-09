@@ -51,17 +51,18 @@ class RSSM(nn.Module):
 
             if observations is not None:
                 hidden = self.relu(self.representation_pre(torch.cat([beliefs[t + 1][0], encoded_observation[t]], dim=0)))
-                print(hidden)
-                posterior_means[t + 1], _posterior_std_dev = torch.chunk(self.representation_post(hidden), 2, dim=1)
+                posterior_means[t + 1], _posterior_std_dev = torch.chunk(self.representation_post(hidden), 2, dim=0)
                 posterior_std_devs[t + 1] = F.softplus(_posterior_std_dev) + 1e-5
                 posterior_states[t + 1] = posterior_means[t + 1] + posterior_std_devs[t + 1] * torch.randn_like(posterior_means[t + 1])
             
-        
+        print(prior_states)
+        print(posterior_states)
+        print(torch.cat([torch.tensor(prior_states), torch.tensor(posterior_states)], dim = 1))
         decoded_observations = self.decoder(torch.cat([prior_states, posterior_states], dim = 0))
-
         hidden = [torch.stack(beliefs[1:], dim=0), torch.stack(prior_states[1:], dim=0), torch.stack(prior_means[1:], dim=0), torch.stack(prior_std_devs[1:], dim=0)]
         if observations is not None:
             hidden += [torch.stack(posterior_states[1:], dim=0), torch.stack(posterior_means[1:], dim=0), torch.stack(posterior_std_devs[1:], dim=0), decoded_observations]
+
         return hidden
 
 ## Reward Model as defined by Reward Model qθ(rt | st):  
