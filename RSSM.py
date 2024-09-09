@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from conv_env_dec import ConvDecoder, ConvEncoder
 
 class RSSM(nn.Module):
+
     '''
     World Model Structure is the following
     Representation Model pθ(st | st-1, at-1, ot)
@@ -13,13 +14,14 @@ class RSSM(nn.Module):
     state_dim --> the dimensions for the state 
     
     '''
+
     def __init__(self, state_dim, action_dim, o_feature_dim, latent_dim, reward_dim):
         super(RSSM, self).__init__()
         self.state_dim = state_dim
         self.latent_dim = latent_dim
 
         self.encoder = ConvEncoder(3, o_feature_dim)
-        self.decoder = ConvDecoder(latent_dim, 3)
+        self.decoder = ConvDecoder(latent_dim * 2, 3)
         self.rnn = nn.GRUCell(input_size=latent_dim, hidden_size=latent_dim)
         
         self.reward_model = RewardModel(latent_dim, state_dim, reward_dim)
@@ -32,7 +34,7 @@ class RSSM(nn.Module):
         self.relu = nn.ReLU()
     
     def forward(self, prev_state, actions, prev_belief, observations = None, nonterminals = None):
-        print(f"Actions {actions}")
+        encoded_observation = self.encoder(observations.float())
         T = actions.size(0) + 1
         beliefs, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs, decoded_observations = [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * (T - 1)
         beliefs[0], prior_states[0], posterior_states[0] = prev_belief, prev_state, prev_state
@@ -40,27 +42,26 @@ class RSSM(nn.Module):
         for t in range(T - 1):
             _state = prior_states[t] if observations is None else posterior_states[t]
             _state = _state if (nonterminals is None or t == 0) else _state * nonterminals[t-1]
-            print(f"State {_state}")
             hidden = self.relu(self.transition_pre(torch.cat([_state, actions[t]], dim=1)))
             beliefs[t + 1] = self.rnn(hidden, beliefs[t])
 
-            hidden = self.relu(self.transition_pre(beliefs[t + 1]))
             prior_means[t + 1], _prior_std_dev = torch.chunk(self.transition_post(hidden), 2, dim=1)
             prior_std_devs[t + 1] = F.softplus(_prior_std_dev) + 1e-5
             prior_states[t + 1] = prior_means[t + 1] + prior_std_devs[t + 1] * torch.randn_like(prior_means[t + 1])
 
             if observations is not None:
-                t_ = t - 1
-                encoded_observation = self.encoder(observations[t_ + 1].float())
-                hidden = self.relu(self.representation_pre(torch.cat([beliefs[t + 1], encoded_observation], dim=1)))
+                hidden = self.relu(self.representation_pre(torch.cat([beliefs[t + 1][0], encoded_observation[t]], dim=0)))
+                print(hidden)
                 posterior_means[t + 1], _posterior_std_dev = torch.chunk(self.representation_post(hidden), 2, dim=1)
                 posterior_std_devs[t + 1] = F.softplus(_posterior_std_dev) + 1e-5
                 posterior_states[t + 1] = posterior_means[t + 1] + posterior_std_devs[t + 1] * torch.randn_like(posterior_means[t + 1])
-                decoded_observations[t] = self.decoder(posterior_states[t + 1])
+            
+        
+        decoded_observations = self.decoder(torch.cat([prior_states, posterior_states], dim = 0))
 
         hidden = [torch.stack(beliefs[1:], dim=0), torch.stack(prior_states[1:], dim=0), torch.stack(prior_means[1:], dim=0), torch.stack(prior_std_devs[1:], dim=0)]
         if observations is not None:
-            hidden += [torch.stack(posterior_states[1:], dim=0), torch.stack(posterior_means[1:], dim=0), torch.stack(posterior_std_devs[1:], dim=0), torch.stack(decoded_observations, dim=0)]
+            hidden += [torch.stack(posterior_states[1:], dim=0), torch.stack(posterior_means[1:], dim=0), torch.stack(posterior_std_devs[1:], dim=0), decoded_observations]
         return hidden
 
 ## Reward Model as defined by Reward Model qθ(rt | st):  
