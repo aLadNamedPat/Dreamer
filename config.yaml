@@ -12,7 +12,7 @@ dreamer:
   batch_size: 10
   batch_train_freq: 10
   buffer_size: 100000000
-  sample_steps: 50
+  sample_steps: 10
   steps_of_sampling: 500
   horizon: 15
 

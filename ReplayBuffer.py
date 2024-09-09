@@ -38,11 +38,22 @@ class Buffer():
         sampled_indices = [self.sample_idx(data_length) for _ in range(data_points)]
 
         batch_states = torch.zeros((data_points, data_length) + self.buffer[0][0].shape)
-        batch_actions = torch.zeros((data_points, data_length) + self.buffer[0][1].shape)
+        batch_actions = torch.zeros((data_points,data_length) + self.buffer[0][1].shape)
         batch_rewards = torch.zeros((data_points, data_length) + self.buffer[0][2].shape)
         batch_next_states = torch.zeros((data_points, data_length) + self.buffer[0][3].shape)
         batch_dones = torch.zeros((data_points, data_length) + self.buffer[0][4].shape)
 
+        # batch_states = torch.zeros((data_points, data_length))
+        # batch_actions = torch.zeros((data_points, data_length))
+        # batch_rewards = torch.zeros((data_points, data_length))
+        # batch_next_states = torch.zeros((data_points, data_length))
+        # batch_dones = torch.zeros((data_points, data_length))
+
+        print(batch_states.shape)
+        print(batch_actions.shape)
+        print(batch_rewards.shape)
+        print(batch_next_states.shape)
+        print(batch_dones.shape)
         print(self.curr_idx)
         print(sampled_indices)
         for i, idxs in enumerate(sampled_indices):

@@ -23,16 +23,23 @@ class ConvEncoder(nn.Module):
         print(f"Conv Input {input}")
         print(f"Input shape: {input.shape}")
         # input = input.reshape(1, input.shape[0], input.shape[1], input.shape[2])  
+        run = False
         if len(input.shape) == 5:
+            run = True
+            data_point, length, width, height, channels = input.shape
             input = input.view(-1, input.shape[2], input.shape[3], input.shape[4])
         input = input.permute(0, 3, 1, 2)
         x = self.relu(self.bn1(self.conv32(input)))
         x = self.relu(self.bn2(self.conv64(x)))
         x = self.relu(self.bn3(self.conv128(x)))
         x = self.relu(self.bn4(self.conv256(x)))
-        ## Change dim to feature vector        
-        x = x.reshape(x.size(0), -1)  
+        ## Change dim to feature vector
+        if run:
+            x = x.reshape(data_point, length, -1)  
+        else:
+            x = x.reshape(x.size(0), -1)
         x = self.fc(x)
+
         return x
     
 class ConvDecoder(nn.Module):

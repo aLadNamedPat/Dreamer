@@ -53,8 +53,10 @@ class RSSM(nn.Module):
             # print(f"Prior State Generated {prior_states[t+1]}")
 
             if observations is not None:
-                hidden = self.relu(self.representation_pre(torch.cat([beliefs[t + 1], encoded_observation[t]], dim=0)))
-                posterior_means[t + 1], _posterior_std_dev = torch.chunk(self.representation_post(hidden), 2, dim=0)
+                beliefs_t = beliefs[t + 1].unsqueeze(0) if beliefs[t + 1].dim() == 1 else beliefs[t + 1]
+                encoded_obs_t = encoded_observation[t].unsqueeze(0) if encoded_observation[t].dim() == 1 else encoded_observation[t]
+                hidden = self.relu(self.representation_pre(torch.cat([beliefs_t, encoded_obs_t], dim=1)))
+                posterior_means[t + 1], _posterior_std_dev = torch.chunk(self.representation_post(hidden.squeeze()), 2, dim=0)
                 posterior_std_devs[t + 1] = F.softplus(_posterior_std_dev) + 1e-5
                 posterior_states[t + 1] = posterior_means[t + 1] + posterior_std_devs[t + 1] * torch.randn_like(posterior_means[t + 1])
                 rewards[t] = self.reward_model(beliefs[t + 1], posterior_states[t + 1])
@@ -75,6 +77,8 @@ class RewardModel(nn.Module):
     def __init__(self, latent_dim, state_dim, hidden_dim):
         super().__init__()
         self.relu = nn.ReLU()
+        self.hidden_dims = state_dim
+        self.latent_dim = latent_dim
         ## Feedforward linear layers
         self.fw1 = nn.Linear(latent_dim + state_dim, hidden_dim)
         self.fw2 = nn.Linear(hidden_dim, hidden_dim)
@@ -84,7 +88,12 @@ class RewardModel(nn.Module):
         latent_space = latent_space.reshape(sampled_state.shape)
         # print(latent_space.shape)
         # print(sampled_state.shape)
+        print(f"Pre-latent space shape {latent_space.shape}")
+        print(f"Pre-sampled state shape {sampled_state.shape}")
+
         x = torch.cat([latent_space, sampled_state], dim=-1)
+        print(f"X shape {x.shape}")
+        print(f"latent dim + hidden dim size: {self.hidden_dims + self.latent_dim}")
         x = self.relu(self.fw1(x))
         x = self.relu(self.fw2(x))
         reward = self.fw3(x)
