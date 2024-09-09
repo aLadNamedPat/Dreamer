@@ -20,8 +20,8 @@ class ConvEncoder(nn.Module):
         self.fc = nn.Linear(256 * 96, feature_dim)  
 
     def forward(self, input):
-        print(f"Conv Input {input}")
-        print(f"Input shape: {input.shape}")
+        # print(f"Conv Input {input}")
+        # print(f"Input shape: {input.shape}")
         # input = input.reshape(1, input.shape[0], input.shape[1], input.shape[2])  
         run = False
         if len(input.shape) == 5:

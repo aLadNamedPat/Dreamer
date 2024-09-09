@@ -42,8 +42,8 @@ class RSSM(nn.Module):
         for t in range(T- 1):
             _state = prior_states[t] if observations is None else posterior_states[t]
             # print(f"State before nonterminals {_state}")
-            _state = _state if (nonterminals is None or t == 0) else _state * nonterminals[t-1]
-            print(_state.shape)
+            # _state = _state if (nonterminals is None or t == 0) else _state * nonterminals[t-1]
+            print(f"state shape {_state.shape}")
             hidden = self.relu(self.transition_pre(torch.cat([_state, actions[t]], dim=1)))
             beliefs[t + 1] = self.rnn(hidden.squeeze(), beliefs[t].squeeze())
 
@@ -56,14 +56,20 @@ class RSSM(nn.Module):
                 beliefs_t = beliefs[t + 1].unsqueeze(0) if beliefs[t + 1].dim() == 1 else beliefs[t + 1]
                 encoded_obs_t = encoded_observation[t].unsqueeze(0) if encoded_observation[t].dim() == 1 else encoded_observation[t]
                 hidden = self.relu(self.representation_pre(torch.cat([beliefs_t, encoded_obs_t], dim=1)))
-                posterior_means[t + 1], _posterior_std_dev = torch.chunk(self.representation_post(hidden.squeeze()), 2, dim=0)
-                posterior_std_devs[t + 1] = F.softplus(_posterior_std_dev) + 1e-5
-                posterior_states[t + 1] = posterior_means[t + 1] + posterior_std_devs[t + 1] * torch.randn_like(posterior_means[t + 1])
+
+                posterior_means[t + 1], _posterior_std_dev = torch.chunk(self.representation_post(hidden), 2, dim=1)
+                posterior_std_devs[t + 1] = F.softplus(_posterior_std_dev.squeeze()) + 1e-5
+                posterior_states[t + 1] = posterior_means[t + 1].squeeze() + posterior_std_devs[t + 1] * torch.randn_like(posterior_means[t + 1].squeeze())
+                print(f"belief state {beliefs[t+1].shape}")
+                print(f"posterior state shape {posterior_states[t + 1].shape}")
                 rewards[t] = self.reward_model(beliefs[t + 1], posterior_states[t + 1])
         
         new_prior_states = torch.zeros((T, self.latent_dim))
         new_posterior_states = torch.zeros((T, self.latent_dim))
         for i in range(len(prior_states)):
+            print(f"prior states {prior_states[i]}")
+            print(f"prior states {prior_states[i].shape}")
+
             new_prior_states[i] = prior_states[i].squeeze()
             new_posterior_states[i] = posterior_states[i].squeeze()
         decoded_observations = self.decoder(torch.cat((new_prior_states, new_posterior_states), dim = 1))
@@ -85,7 +91,6 @@ class RewardModel(nn.Module):
         self.fw3 = nn.Linear(hidden_dim, 1)
     
     def forward(self, latent_space, sampled_state):
-        latent_space = latent_space.reshape(sampled_state.shape)
         # print(latent_space.shape)
         # print(sampled_state.shape)
         print(f"Pre-latent space shape {latent_space.shape}")
