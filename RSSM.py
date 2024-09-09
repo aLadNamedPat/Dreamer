@@ -43,6 +43,7 @@ class RSSM(nn.Module):
             _state = prior_states[t] if observations is None else posterior_states[t]
             # print(f"State before nonterminals {_state}")
             _state = _state if (nonterminals is None or t == 0) else _state * nonterminals[t-1]
+            print(_state.shape)
             hidden = self.relu(self.transition_pre(torch.cat([_state, actions[t]], dim=1)))
             beliefs[t + 1] = self.rnn(hidden.squeeze(), beliefs[t].squeeze())
 

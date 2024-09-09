@@ -225,7 +225,7 @@ class Dreamer(nn.Module):
 
         # with torch.no_grad():
         #     values = self.critic(torch.cat([states, beliefs], dim = -1)[:,:-1])
-        
+        self.critic_optimizer.zero_grad()
         critic_loss = -torch.mean(values.log_prob(returns))# For value loss (critic loss), we want to find the log probability of finding that returns for the given value predicted
         critic_loss.backward()
         self.critic_optimizer.step()
