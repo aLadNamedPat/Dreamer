@@ -34,33 +34,36 @@ class RSSM(nn.Module):
     def forward(self, prev_state, actions, prev_belief, observations = None, nonterminals = None):
         print(f"Actions {actions}")
         T = actions.size(0) + 1
-        beliefs, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs, decoded_observations = [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * (T - 1)
+        beliefs, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs, decoded_observations, rewards = [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * (T - 1), [torch.empty(0)] * (T - 1)
         beliefs[0], prior_states[0], posterior_states[0] = prev_belief, prev_state, prev_state
 
-        for t in range(T - 1):
+        for t in range(T- 1):
             _state = prior_states[t] if observations is None else posterior_states[t]
+            print(f"State before nonterminals {_state}")
             _state = _state if (nonterminals is None or t == 0) else _state * nonterminals[t-1]
             print(f"State {_state}")
+            print(f"State Shape: {_state.shape}")
             hidden = self.relu(self.transition_pre(torch.cat([_state, actions[t]], dim=1)))
             beliefs[t + 1] = self.rnn(hidden, beliefs[t])
 
-            hidden = self.relu(self.transition_pre(beliefs[t + 1]))
+            # hidden = self.relu(self.transition_pre(beliefs[t + 1]))
             prior_means[t + 1], _prior_std_dev = torch.chunk(self.transition_post(hidden), 2, dim=1)
             prior_std_devs[t + 1] = F.softplus(_prior_std_dev) + 1e-5
             prior_states[t + 1] = prior_means[t + 1] + prior_std_devs[t + 1] * torch.randn_like(prior_means[t + 1])
+            print(f"Prior State Generated {prior_states[t+1]}")
 
             if observations is not None:
-                t_ = t - 1
-                encoded_observation = self.encoder(observations[t_ + 1].float())
+                encoded_observation = self.encoder(observations[t].float())
                 hidden = self.relu(self.representation_pre(torch.cat([beliefs[t + 1], encoded_observation], dim=1)))
                 posterior_means[t + 1], _posterior_std_dev = torch.chunk(self.representation_post(hidden), 2, dim=1)
                 posterior_std_devs[t + 1] = F.softplus(_posterior_std_dev) + 1e-5
                 posterior_states[t + 1] = posterior_means[t + 1] + posterior_std_devs[t + 1] * torch.randn_like(posterior_means[t + 1])
                 decoded_observations[t] = self.decoder(posterior_states[t + 1])
+                rewards[t] = self.reward_model(beliefs[t + 1], posterior_states[t + 1])
 
         hidden = [torch.stack(beliefs[1:], dim=0), torch.stack(prior_states[1:], dim=0), torch.stack(prior_means[1:], dim=0), torch.stack(prior_std_devs[1:], dim=0)]
         if observations is not None:
-            hidden += [torch.stack(posterior_states[1:], dim=0), torch.stack(posterior_means[1:], dim=0), torch.stack(posterior_std_devs[1:], dim=0), torch.stack(decoded_observations, dim=0)]
+            hidden += [torch.stack(posterior_states[1:], dim=0), torch.stack(posterior_means[1:], dim=0), torch.stack(posterior_std_devs[1:], dim=0), torch.stack(decoded_observations, dim=0), torch.stack(rewards, dim=0)]
         return hidden
 
 ## Reward Model as defined by Reward Model qθ(rt | st):  
