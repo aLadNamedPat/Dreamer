@@ -151,7 +151,7 @@ class Dreamer(nn.Module):
             torch.distributions.Normal(posterior_means, posterior_std_devs),
             torch.distributions.Normal(prior_means, prior_std_devs)
         ).mean()
-
+        
         beliefs, states, actions = self.latent_imagine(prev_state.to(device), posterior_means.to(device), self.horizon)
         ## TODO: Calculate the following properly!!!!
         # Calculate the reward loss
