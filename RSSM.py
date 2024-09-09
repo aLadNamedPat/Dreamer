@@ -53,7 +53,7 @@ class RSSM(nn.Module):
 
             if observations is not None:
                 hidden = self.relu(self.representation_pre(torch.cat([beliefs[t + 1][0], encoded_observation[t]], dim=0)))
-                print(hidden)
+                print(f"hidden {hidden}")
                 posterior_means[t + 1], _posterior_std_dev = torch.chunk(self.representation_post(hidden), 2, dim=1)
                 posterior_std_devs[t + 1] = F.softplus(_posterior_std_dev) + 1e-5
                 posterior_states[t + 1] = posterior_means[t + 1] + posterior_std_devs[t + 1] * torch.randn_like(posterior_means[t + 1])
