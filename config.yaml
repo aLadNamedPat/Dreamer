@@ -9,8 +9,8 @@ dreamer:
   reward_dim: 1
   gamma: 0.99
   lambda_: 0.95
-  batch_size: 50
-  batch_train_freq: 50
+  batch_size: 10
+  batch_train_freq: 10
   buffer_size: 100000000
   sample_steps: 50
   steps_of_sampling: 500

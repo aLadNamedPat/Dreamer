@@ -125,6 +125,7 @@ class Dreamer(nn.Module):
         print(actions.shape)
         print(rewards_real.shape)
         print(dones.shape)
+
         # Get the initial state and latent space
 
         prev_state = torch.zeros((self.batch_size, self.RSSM.state_dim))
@@ -155,7 +156,7 @@ class Dreamer(nn.Module):
         beliefs, states, actions = self.latent_imagine(prev_state.to(device), posterior_means.to(device), self.horizon)
         ## TODO: Calculate the following properly!!!!
         # Calculate the reward loss
-
+        
         reward_loss = mse_loss(rewards_real.float().to(device), rewards.squeeze()).float()
         # Total loss
         total_loss = observation_loss + kl_loss + reward_loss
@@ -202,10 +203,17 @@ class Dreamer(nn.Module):
         
         # print(f"reward: {rewards.shape}")
         # print(f"values: {values}")
+        # returns = self.find_predicted_returns(
+        #     rewards[:, :-1], # Remember that the batch_sample is two dimensional which means that the rewards and values will be two dimensional
+        #     values.mean[:, :-1],
+        #     last_reward = rewards[:, -1],
+        #     _lambda = self.lambda_
+        # )
+
         returns = self.find_predicted_returns(
-            rewards[:, :-1], # Remember that the batch_sample is two dimensional which means that the rewards and values will be two dimensional
-            values.mean[:, :-1],
-            last_reward = rewards[:, -1],
+            rewards[-1], # Remember that the batch_sample is two dimensional which means that the rewards and values will be two dimensional
+            values.mean[-1],
+            last_reward = rewards[-1],
             _lambda = self.lambda_
         )
         
@@ -239,7 +247,7 @@ class Dreamer(nn.Module):
         total_rewards = 0
         for t in range(self.batch_train_freq):
             self.num_timesteps += 1
-            action = self.sample_action(torch.cat([self.prev_state, self.prev_latent_space], dim = -1).to(device))
+            action = self.sample_action(torch.cat([self.prev_state.squeeze(), self.prev_latent_space.squeeze()], dim = -1).to(device))
             action = torch.tensor(action, dtype=torch.float32)
             if action.dim() == 1:
                 action = action.reshape(1, action.shape[0])
@@ -390,7 +398,7 @@ class Dreamer(nn.Module):
         outputs = []
 
         for i in range(pred_rewards.shape[1] - 1, -1, -1):
-            curr_val = targets[:, i] + _lambda * curr_val
+            curr_val = targets[i] + _lambda * curr_val
             outputs.append(curr_val)
         outputs = torch.stack(outputs, dim = 1)
         outputs = torch.flip(outputs, [0])
