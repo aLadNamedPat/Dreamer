@@ -9,7 +9,11 @@ import pickle
 import gzip
 import torch.nn.functional as F
 
-device = torch.device("cpu")
+if torch.cuda.is_available():
+  device = torch.device('cuda')
+else:
+  device = torch.device('cpu')
+
 
 wandb.init(
     project="Dreamer",
@@ -27,6 +31,8 @@ class Dreamer(nn.Module):
             state_dims : int,
             latent_dims : int,
             o_feature_dim : int,
+            img_h : int,
+            img_w : int,
             reward_dim : int,
             gamma : float  = 0.99,
             lambda_ : float = 0.95,
@@ -53,6 +59,8 @@ class Dreamer(nn.Module):
         self.sample_steps = sample_steps
         self.steps_of_sampling = steps_of_sampling
         self.horizon = horizon
+        self.img_h = img_h
+        self.img_w = img_w
 
         # Actor needs to output the action to take at a standard deviation
         self.actor = DenseConnections(
@@ -73,6 +81,7 @@ class Dreamer(nn.Module):
             state_dim=self.state_dims,
             action_dim=self.action_space,
             o_feature_dim=self.o_feature_dim,
+            o_dim = (self.img_h, self.img_w),
             latent_dim=self.latent_dims,
             reward_dim=self.reward_dim
         ).to(device)
@@ -116,15 +125,14 @@ class Dreamer(nn.Module):
         return latent_list, state_list, action_list
 
     # Will return new trajectories of states and actions that will be used to train our model
-
     def model_update(self):
 
         # Sample a batch of experiences from the replay buffer
         states, actions, rewards_real, next_states, dones = self.replayBuffer.sample(self.batch_size, self.sample_steps)
-        print(states.shape)
-        print(actions.shape)
-        print(rewards_real.shape)
-        print(dones.shape)
+        # print(states.shape)
+        # print(actions.shape)
+        # print(rewards_real.shape)
+        # print(dones.shape)
 
         # Get the initial state and latent space
 
@@ -134,6 +142,8 @@ class Dreamer(nn.Module):
         # print(f"Dones: {dones}")
         # print(f"actions: {actions.squeeze()}")
         # print(f"states: {prev_state.shape}")
+
+        # import pdb; pdb.set_trace()
 
         latent_spaces, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs, decoded_observations, rewards = self.RSSM(
             prev_state.to(device),
@@ -145,7 +155,9 @@ class Dreamer(nn.Module):
         
         # Calculate the MSE loss for observation and decoded observation
         mse_loss = nn.MSELoss()
-        observation_loss = mse_loss(states.float().to(device), decoded_observations)
+        # print(f"States : {states.shape}")
+        # print(f"Decoded  : {decoded_observations.shape}")
+        observation_loss = mse_loss(states.float(), decoded_observations)
         
         # Calculate the KL divergence loss between the prior and posterior distributions
         kl_loss = torch.distributions.kl_divergence(
@@ -153,13 +165,13 @@ class Dreamer(nn.Module):
             torch.distributions.Normal(prior_means, prior_std_devs)
         ).mean()
         
-        beliefs, states, actions = self.latent_imagine(prev_state.to(device), posterior_means.to(device), self.horizon)
+        # beliefs, states, actions = self.latent_imagine(prev_state.to(device), posterior_means.to(device), self.horizon)
         ## TODO: Calculate the following properly!!!!
         # Calculate the reward loss
         
-        reward_loss = mse_loss(rewards_real.float().to(device), rewards.squeeze()).float()
+        # reward_loss = mse_loss(rewards_real.float().to(device), rewards.squeeze()).float()
         # Total loss
-        total_loss = observation_loss + kl_loss + reward_loss
+        total_loss = observation_loss + 0.1 *  kl_loss
 
         # Backpropagation and optimization
         self.RSSM_optimizer.zero_grad()
@@ -173,7 +185,8 @@ class Dreamer(nn.Module):
         #     "reward_loss": reward_loss.item(),
         #     "total_loss": total_loss.item()
         # })
-        
+        beliefs = None
+        reward_loss = None
         return beliefs, states, actions, reward_loss, kl_loss, observation_loss
 
 
@@ -243,6 +256,7 @@ class Dreamer(nn.Module):
 
     def rollout(
         self,
+        use_RSSM = False
     ):
         total_rewards = 0
         for t in range(self.batch_train_freq):
@@ -252,25 +266,26 @@ class Dreamer(nn.Module):
             if action.dim() == 1:
                 action = action.reshape(1, action.shape[0])
             timestep = self.env.step(action.cpu())
-            obs = torch.tensor(self.env.physics.render(camera_id=0, height=128, width=192).copy())
+            obs = torch.tensor(self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w).copy())
             obs = obs.reshape(1, obs.shape[0], obs.shape[1], obs.shape[2]).detach()
             action = action.reshape(1, action.shape[0], action.shape[1])
-            states = self.RSSM(
-                self.prev_state.to(device), 
-                action.to(device), 
-                self.prev_latent_space.to(device), 
-                nonterminals=1-timestep.last(), 
-                observations=obs.to(device)
-            )
+            if use_RSSM:
+                states = self.RSSM(
+                    self.prev_state.to(device), 
+                    action.to(device), 
+                    self.prev_latent_space.to(device), 
+                    nonterminals=1-timestep.last(), 
+                    observations=obs.to(device)
+                )
 
-            # print(f"States {states}")
-            if obs is not None:
-                latent_spaces, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs, decoded_observations, rewards = states
-            else:
-                latent_spaces, prior_states, prior_means, prior_std_devs, rewards = states
+                print(f"States {states}")
+                if obs is not None:
+                    latent_spaces, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs, decoded_observations, rewards = states
+                else:
+                    latent_spaces, prior_states, prior_means, prior_std_devs, rewards = states
 
-            self.prev_state = posterior_states
-            self.prev_latent_space = latent_spaces
+                self.prev_state = None
+                self.prev_latent_space = None
 
             self.replayBuffer.add(self.last_obs, action, timestep.reward, obs, timestep.last())
             self.last_obs = obs
@@ -285,12 +300,12 @@ class Dreamer(nn.Module):
         timesteps : int,
         num_points : int,
         data_length : int,
-        update_steps : int = 100,
+        update_steps : int = 10,
     ):
         self.num_points = num_points
         self.data_length = data_length
         obs = self.env.reset()
-        render = self.env.physics.render(camera_id=0, height=128, width=192)
+        render = self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w)
         self.last_obs = torch.tensor(render.copy())
         self.prev_state = torch.zeros((1, self.RSSM.state_dim))
         self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim))
@@ -301,14 +316,14 @@ class Dreamer(nn.Module):
         while(self.num_timesteps < self.steps_of_sampling):
             self.rollout()
             obs = self.env.reset()
-            render = self.env.physics.render(camera_id=0, height=128, width=192)
+            render = self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w)
             self.last_obs = torch.tensor(render.copy())
 
         obs = self.env.reset()
-        render = self.env.physics.render(camera_id=0, height=128, width=192)
+        render = self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w)
         self.last_obs = torch.tensor(render.copy())
-        self.prev_state = torch.zeros((1, self.RSSM.state_dim))
-        self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim))
+        # self.prev_state = torch.zeros((1, self.RSSM.state_dim))
+        # self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim))
 
         while (self.num_timesteps < timesteps):
             # wandb.init(project="dreamer_training", reinit=True)
@@ -319,24 +334,24 @@ class Dreamer(nn.Module):
             total_kl_loss = 0
             total_decoder_loss = 0
             for i in range(update_steps):
+                print(f"i : {i}")
                 beliefs, states, actions, reward_loss, kl_loss, decoder_loss = self.model_update()
 
                 # The data that the agent update receives should be the encoded space already to save memory
-                beliefs = beliefs.detach()
+                # beliefs = beliefs.detach()
                 states = states.detach()
                 actions = actions.detach()
-                actor_loss, critic_loss = self.agent_update(beliefs, states, actions)
-                total_actor_loss += actor_loss.item()
-                total_critic_loss += critic_loss.item()
-                total_reward_loss += reward_loss.item()
+                # actor_loss, critic_loss = self.agent_update(beliefs, states, actions)
+                # total_actor_loss += actor_loss.item()
+                # total_critic_loss += critic_loss.item()
+                # total_reward_loss += reward_loss.item()
                 total_kl_loss += kl_loss.item()
                 total_decoder_loss += decoder_loss.item()
-                # Log training progress to wandb
                 wandb.log({
                     "num_timesteps": self.num_timesteps,
-                    "actor_loss": actor_loss.item(),
-                    "critic_loss": critic_loss.item(),
-                    "reward_loss" : reward_loss,
+                    # "actor_loss": actor_loss.item(),
+                    # "critic_loss": critic_loss.item(),
+                    # "reward_loss" : reward_loss,
                     "observation_loss" : decoder_loss,
                     "kl_loss" : kl_loss.item()
                 })
@@ -350,11 +365,10 @@ class Dreamer(nn.Module):
             print(f"Timestep: {self.num_timesteps}, Avg Actor Loss: {avg_actor_loss}, Avg Critic Loss: {avg_critic_loss}, Avg Reward Loss: {avg_reward_loss}, Avg KL Loss: {avg_kl_loss}, Avg Decoder Loss: {avg_decoder_loss}")
 
             obs = self.env.reset()
-            render = self.env.physics.render(camera_id=0, height=128, width=192)
+            render = self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w)
             self.last_obs = torch.tensor(render.copy())
             self.prev_state = torch.zeros((1, self.RSSM.state_dim))
             self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim))
-
 
         return
     

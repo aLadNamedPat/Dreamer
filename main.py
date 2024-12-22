@@ -62,6 +62,8 @@ if __name__ == '__main__':
         state_dims=config['dreamer']['state_dims'],
         latent_dims=config['dreamer']['latent_dims'],
         o_feature_dim=config['dreamer']['o_feature_dim'],
+        img_h=config['dreamer']['img_h'],
+        img_w=config['dreamer']['img_w'],
         reward_dim=config['dreamer']['reward_dim'],
         gamma=config['dreamer']['gamma'],
         lambda_=config['dreamer']['lambda_'],

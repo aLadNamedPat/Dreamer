@@ -23,9 +23,9 @@ class Buffer():
         return indices
     
     # Supports both random sampling and random sampling with fixed data length
-    def sample(self, data_points : int, data_length : int, random_flag : bool = False):
+    def sample(self, batch_size : int, data_length : int, random_flag : bool = False):
         # if random_flag:
-        #     sampled_experiences = random.sample(self.buffer, data_points)
+        #     sampled_experiences = random.sample(self.buffer, batch_size)
         #     batch_states = torch.stack([exp[0].squeeze(0) if exp[0].dim() == 4 else exp[0] for exp in sampled_experiences])
         #     batch_actions = torch.stack([exp[1] for exp in sampled_experiences])
         #     batch_rewards = torch.stack([exp[2] for exp in sampled_experiences])
@@ -35,19 +35,21 @@ class Buffer():
         #     return batch_states, batch_actions, batch_rewards, batch_next_states, batch_dones
         # else:
 
-        sampled_indices = [self.sample_idx(data_length) for _ in range(data_points)]
+        sampled_indices = [self.sample_idx(data_length) for _ in range(batch_size)]
+        print(f"Batch Size : {batch_size}")
+        print(f"Data Length : {data_length}")
+        # print(f"Buffer : {self.buffer}")
+        batch_states = torch.zeros((batch_size, data_length) + self.buffer[0][0].shape)
+        batch_actions = torch.zeros((batch_size, data_length) + self.buffer[0][1].shape)
+        batch_rewards = torch.zeros((batch_size, data_length) + self.buffer[0][2].shape)
+        batch_next_states = torch.zeros((batch_size, data_length) + self.buffer[0][3].shape)
+        batch_dones = torch.zeros((batch_size, data_length) + self.buffer[0][4].shape)
 
-        batch_states = torch.zeros((data_points, data_length) + self.buffer[0][0].shape)
-        batch_actions = torch.zeros((data_points,data_length) + self.buffer[0][1].shape)
-        batch_rewards = torch.zeros((data_points, data_length) + self.buffer[0][2].shape)
-        batch_next_states = torch.zeros((data_points, data_length) + self.buffer[0][3].shape)
-        batch_dones = torch.zeros((data_points, data_length) + self.buffer[0][4].shape)
-
-        # batch_states = torch.zeros((data_points, data_length))
-        # batch_actions = torch.zeros((data_points, data_length))
-        # batch_rewards = torch.zeros((data_points, data_length))
-        # batch_next_states = torch.zeros((data_points, data_length))
-        # batch_dones = torch.zeros((data_points, data_length))
+        # batch_states = torch.zeros((batch_size, data_length))
+        # batch_actions = torch.zeros((batch_size, data_length))
+        # batch_rewards = torch.zeros((batch_size, data_length))
+        # batch_next_states = torch.zeros((batch_size, data_length))
+        # batch_dones = torch.zeros((batch_size, data_length))
 
         print(batch_states.shape)
         print(batch_actions.shape)
@@ -73,4 +75,3 @@ class Buffer():
 
     def get_size(self):
         return len(self.buffer)
-
