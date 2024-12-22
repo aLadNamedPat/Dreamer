@@ -61,6 +61,7 @@ class Dreamer(nn.Module):
         self.horizon = horizon
         self.img_h = img_h
         self.img_w = img_w
+        self.device = device
 
         # Actor needs to output the action to take at a standard deviation
         self.actor = DenseConnections(
@@ -136,8 +137,8 @@ class Dreamer(nn.Module):
 
         # Get the initial state and latent space
 
-        prev_state = torch.zeros((self.batch_size, self.RSSM.state_dim))
-        prev_latent_space = torch.zeros((self.batch_size, self.RSSM.latent_dim))
+        prev_state = torch.zeros((self.batch_size, self.RSSM.state_dim)).to(self.device)
+        prev_latent_space = torch.zeros((self.batch_size, self.RSSM.latent_dim)).to(self.device)
         # Forward pass through the RSSM
         # print(f"Dones: {dones}")
         # print(f"actions: {actions.squeeze()}")
@@ -262,11 +263,11 @@ class Dreamer(nn.Module):
         for t in range(self.batch_train_freq):
             self.num_timesteps += 1
             action = self.sample_action(torch.cat([self.prev_state.squeeze(), self.prev_latent_space.squeeze()], dim = -1).to(device))
-            action = torch.tensor(action, dtype=torch.float32)
+            action = torch.tensor(action, dtype=torch.float32).to(self.device)
             if action.dim() == 1:
                 action = action.reshape(1, action.shape[0])
             timestep = self.env.step(action.cpu())
-            obs = torch.tensor(self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w).copy())
+            obs = torch.tensor(self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w).copy()).to(self.device)
             obs = obs.reshape(1, obs.shape[0], obs.shape[1], obs.shape[2]).detach()
             action = action.reshape(1, action.shape[0], action.shape[1])
             if use_RSSM:
@@ -306,9 +307,9 @@ class Dreamer(nn.Module):
         self.data_length = data_length
         obs = self.env.reset()
         render = self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w)
-        self.last_obs = torch.tensor(render.copy())
-        self.prev_state = torch.zeros((1, self.RSSM.state_dim))
-        self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim))
+        self.last_obs = torch.tensor(render.copy()).to(self.device)
+        self.prev_state = torch.zeros((1, self.RSSM.state_dim)).to(self.device)
+        self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim)).to(self.device)
 
         self.num_timesteps = 0
         total_rewards = 0
@@ -317,13 +318,13 @@ class Dreamer(nn.Module):
             self.rollout()
             obs = self.env.reset()
             render = self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w)
-            self.last_obs = torch.tensor(render.copy())
+            self.last_obs = torch.tensor(render.copy()).to(self.device)
 
         obs = self.env.reset()
         render = self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w)
-        self.last_obs = torch.tensor(render.copy())
-        # self.prev_state = torch.zeros((1, self.RSSM.state_dim))
-        # self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim))
+        self.last_obs = torch.tensor(render.copy()).to(self.device)
+        # self.prev_state = torch.zeros((1, self.RSSM.state_dim)).to(self.device)
+        # self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim)).to(self.device)
 
         while (self.num_timesteps < timesteps):
             # wandb.init(project="dreamer_training", reinit=True)
@@ -366,9 +367,9 @@ class Dreamer(nn.Module):
 
             obs = self.env.reset()
             render = self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w)
-            self.last_obs = torch.tensor(render.copy())
-            self.prev_state = torch.zeros((1, self.RSSM.state_dim))
-            self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim))
+            self.last_obs = torch.tensor(render.copy()).to(self.device)
+            self.prev_state = torch.zeros((1, self.RSSM.state_dim)).to(self.device)
+            self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim)).to(self.device)
 
         return
     

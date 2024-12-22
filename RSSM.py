@@ -33,31 +33,38 @@ class RSSM(nn.Module):
         self.representation_pre = nn.Linear((latent_dim + compute_encoder_output_size((1, 1, o_dim[0], o_dim[1], 3), self.encoder)), latent_dim)
         self.representation_post = nn.Linear(latent_dim, 2 * state_dim)
         self.relu = nn.ReLU()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     def forward(self, prev_state, actions, prev_belief, observations = None, nonterminals = None):
+        prev_state = prev_state.to(self.device)
+        actions = actions.to(self.device)
+        if observations is not None:
+            observations = observations.to(self.device)
+        
         encoded_observation = self.encoder(observations.float())
         T = actions.size(1) + 1
         batch_size = actions.size(0)
 
-        beliefs = torch.zeros(batch_size, T, self.latent_dim)
-        prior_states = torch.zeros(batch_size, T, self.state_dim)
+        beliefs = torch.zeros(batch_size, T, self.latent_dim).to(self.device)
+        prior_states = torch.zeros(batch_size, T, self.state_dim).to(self.device)
         prior_means = torch.zeros(batch_size, T, self.state_dim)
         prior_std_devs = torch.zeros(batch_size, T, self.state_dim)
-        posterior_states = torch.zeros(batch_size, T, self.state_dim)
+        posterior_states = torch.zeros(batch_size, T, self.state_dim).to(self.device)
         posterior_means = torch.zeros(batch_size, T, self.state_dim)
         posterior_std_devs = torch.zeros(batch_size, T, self.state_dim)
 
         ## TODO Change Image Dimensions
-        decoded_observations = torch.zeros(batch_size, T - 1, 3, 64, 64)
-        rewards = torch.zeros(batch_size, T - 1, 1)
+        decoded_observations = torch.zeros(batch_size, T - 1, 3, 64, 64).to(self.device)
+        rewards = torch.zeros(batch_size, T - 1, 1).to(self.device)
         
         # Why are these the same??
         beliefs[:, 0] = prev_belief.clone()
         prior_states[:, 0] = prev_state.clone()
         posterior_states[:, 0] = prev_state.clone()
+        
 
         for t in range(T - 1):
-            _state = prior_states[:, t] if observations is None else posterior_states[:, t]
+            _state = (prior_states[:, t] if observations is None else posterior_states[:, t]).to(self.device)
             # print(f"State 1 Shape : {torch.cat([_state, actions[:, t]], dim=-1).shape}")
             # print(f"Actions 2 Shape : {torch.cat([_state, actions[:, t]], dim=1).shape}")
             # import pdb; pdb.set_trace()
@@ -85,7 +92,9 @@ class RSSM(nn.Module):
         # print(f"Prior States Shape: {prior_states.shape}")
         # print(f"Posterior States Shape: {posterior_states.shape}")
         # print(f"Concat Shape : {torch.cat((prior_states[:, 1:], posterior_states[:, 1:]), dim = -1).shape}")
-        decoded_observations = self.decoder(torch.cat((prior_states[:, 1:], posterior_states[:, 1:]), dim= -1))
+        decoded_observations = self.decoder(
+            torch.cat((prior_states[:, 1:], posterior_states[:, 1:]), dim=-1).to(self.device)
+        )
         hidden = [beliefs[:, 1:], prior_states[:, 1:], prior_means[:, 1:], prior_std_devs[:, 1:]]
         if observations is not None:
             hidden += [posterior_states[:, 1:], posterior_means[:, 1:], posterior_std_devs[:, 1:], decoded_observations, rewards]
@@ -102,16 +111,15 @@ class RewardModel(nn.Module):
         self.fw1 = nn.Linear(latent_dim + state_dim, hidden_dim)
         self.fw2 = nn.Linear(hidden_dim, hidden_dim)
         self.fw3 = nn.Linear(hidden_dim, 1)
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     def forward(self, latent_space, sampled_state):
-        # print(latent_space.shape)
-        # print(sampled_state.shape)
-        # print(f"Pre-latent space shape {latent_space.shape}")
-        # print(f"Pre-sampled state shape {sampled_state.shape}")
+        # Ensure both tensors are on the same device
+        ## TODO : Remove this
+        latent_space = latent_space.to(self.device)
+        sampled_state = sampled_state.to(self.device)
 
         x = torch.cat([latent_space, sampled_state], dim=-1)
-        # print(f"X shape {x.shape}")
-        # print(f"latent dim + hidden dim size: {self.hidden_dims + self.latent_dim}")
         x = self.relu(self.fw1(x))
         x = self.relu(self.fw2(x))
         reward = self.fw3(x)

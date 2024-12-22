@@ -7,9 +7,16 @@ class Buffer():
         self.buffer = deque(maxlen=buffer_size)
         self.buffer_size = buffer_size
         self.curr_idx = 0
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     def add(self, state, action, rewards, next_state, done) -> None:
-        self.buffer.append((torch.tensor(state.squeeze()), torch.tensor(action), torch.tensor(rewards), torch.tensor(next_state), torch.tensor(done)))
+        self.buffer.append((
+            torch.tensor(state.squeeze()).to(self.device),
+            torch.tensor(action).to(self.device),
+            torch.tensor(rewards).to(self.device),
+            torch.tensor(next_state).to(self.device),
+            torch.tensor(done).to(self.device)
+        ))
         self.curr_idx = (self.curr_idx + 1) % self.buffer_size
 
 
@@ -39,11 +46,11 @@ class Buffer():
         print(f"Batch Size : {batch_size}")
         print(f"Data Length : {data_length}")
         # print(f"Buffer : {self.buffer}")
-        batch_states = torch.zeros((batch_size, data_length) + self.buffer[0][0].shape)
-        batch_actions = torch.zeros((batch_size, data_length) + self.buffer[0][1].shape)
-        batch_rewards = torch.zeros((batch_size, data_length) + self.buffer[0][2].shape)
-        batch_next_states = torch.zeros((batch_size, data_length) + self.buffer[0][3].shape)
-        batch_dones = torch.zeros((batch_size, data_length) + self.buffer[0][4].shape)
+        batch_states = torch.zeros((batch_size, data_length) + self.buffer[0][0].shape).to(self.device)
+        batch_actions = torch.zeros((batch_size, data_length) + self.buffer[0][1].shape).to(self.device)
+        batch_rewards = torch.zeros((batch_size, data_length) + self.buffer[0][2].shape).to(self.device)
+        batch_next_states = torch.zeros((batch_size, data_length) + self.buffer[0][3].shape).to(self.device)
+        batch_dones = torch.zeros((batch_size, data_length) + self.buffer[0][4].shape).to(self.device)
 
         # batch_states = torch.zeros((batch_size, data_length))
         # batch_actions = torch.zeros((batch_size, data_length))
