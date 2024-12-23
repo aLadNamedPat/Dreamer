@@ -43,14 +43,19 @@ class Buffer():
         # else:
 
         sampled_indices = [self.sample_idx(data_length) for _ in range(batch_size)]
-        print(f"Batch Size : {batch_size}")
-        print(f"Data Length : {data_length}")
+        # print(f"Batch Size : {batch_size}")
+        # print(f"Data Length : {data_length}")
         # print(f"Buffer : {self.buffer}")
         batch_states = torch.zeros((batch_size, data_length) + self.buffer[0][0].shape).to(self.device)
         batch_actions = torch.zeros((batch_size, data_length) + self.buffer[0][1].shape).to(self.device)
         batch_rewards = torch.zeros((batch_size, data_length) + self.buffer[0][2].shape).to(self.device)
         batch_next_states = torch.zeros((batch_size, data_length) + self.buffer[0][3].shape).to(self.device)
         batch_dones = torch.zeros((batch_size, data_length) + self.buffer[0][4].shape).to(self.device)
+        # print(f"Batch States Shape: {batch_states.shape}")
+        # print(f"Batch Actions Shape: {batch_actions.shape}")
+        # print(f"Batch Rewards Shape: {batch_rewards.shape}")
+        # print(f"Batch Next States Shape: {batch_next_states.shape}")
+        # print(f"Batch Dones Shape: {batch_dones.shape}")
 
         # batch_states = torch.zeros((batch_size, data_length))
         # batch_actions = torch.zeros((batch_size, data_length))
@@ -65,20 +70,31 @@ class Buffer():
         # print(batch_dones.shape)
         # print(self.curr_idx)
         # print(sampled_indices)
+        
+        # print(f"Sampled Indices: {sampled_indices}")
         for i, idxs in enumerate(sampled_indices):
-            idx_sequence_states = torch.stack([self.buffer[idx][0] for idx in idxs])
+            # print(f"Sampling index: {i}")
+            idx_sequence_states = torch.stack([self.buffer[idx][0] / 255.0 for idx in idxs])
             idx_sequence_actions = torch.stack([self.buffer[idx][1] for idx in idxs])
             idx_sequence_rewards = torch.stack([self.buffer[idx][2] for idx in idxs])
             idx_sequence_next_states = torch.stack([self.buffer[idx][3] for idx in idxs])
             idx_sequence_dones = torch.stack([self.buffer[idx][4] for idx in idxs])
-
+            
+            # print(f"States shape: {idx_sequence_states.shape}")
+            # print(f"Actions shape: {idx_sequence_actions.shape}")
+            # print(f"Rewards shape: {idx_sequence_rewards.shape}")
+            # print(f"Next States shape: {idx_sequence_next_states.shape}")
+            # print(f"Dones shape: {idx_sequence_dones.shape}")
+            # print(f"idx_sequence_states: {idx_sequence_states}")
+            # print(f"Rewards : {idx_sequence_rewards}")
             batch_states[i] = idx_sequence_states
+            
             batch_actions[i] = idx_sequence_actions
             batch_rewards[i] = idx_sequence_rewards
             batch_next_states[i] = idx_sequence_next_states
             batch_dones[i] = idx_sequence_dones
 
-            return batch_states, batch_actions, batch_rewards, batch_next_states, batch_dones
+        return batch_states, batch_actions, batch_rewards, batch_next_states, batch_dones
 
     def get_size(self):
         return len(self.buffer)

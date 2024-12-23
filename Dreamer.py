@@ -146,6 +146,7 @@ class Dreamer(nn.Module):
 
         # import pdb; pdb.set_trace()
 
+        # print(f"STATES : {states}")
         latent_spaces, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs, decoded_observations, rewards = self.RSSM(
             prev_state.to(device),
             actions.squeeze().float().to(device),
@@ -328,7 +329,9 @@ class Dreamer(nn.Module):
 
         while (self.num_timesteps < timesteps):
             # wandb.init(project="dreamer_training", reinit=True)
+            print(f"In Rollout")
             self.rollout()
+            print(f"Out Rollout")
             total_actor_loss = 0
             total_critic_loss = 0
             total_reward_loss = 0

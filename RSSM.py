@@ -1,7 +1,8 @@
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F
-from conv_env_dec import ConvDecoder, ConvEncoder, compute_encoder_output_size
+from conv_env_dec import ConvDecoder, ConvEncoder
+import matplotlib.pyplot as plt
 
 class RSSM(nn.Module):
 
@@ -21,18 +22,25 @@ class RSSM(nn.Module):
         self.state_dim = state_dim
         self.latent_dim = latent_dim
         self.o_feature_dim = o_feature_dim
+        self.reward_dim = reward_dim
+        self.o_dim = o_dim
+        self.o_feature_dim = o_feature_dim
+        self.state_dim = state_dim
+        self.latent_dim = latent_dim
+        self.reward_dim = reward_dim
+
+        self.encoder = ConvEncoder(self.o_feature_dim, self.latent_dim)
+        self.decoder = ConvDecoder(self.o_feature_dim, latent_size=self.latent_dim * 2, shape=(o_dim[0], o_dim[1], 3))
+        self.rnn = nn.GRUCell(input_size=self.latent_dim, hidden_size=self.latent_dim)
         
-        self.encoder = ConvEncoder(self.o_feature_dim)
-        self.decoder = ConvDecoder(latent_dim * 2, shape = (o_dim[0], o_dim[1], 3))
-        self.rnn = nn.GRUCell(input_size=latent_dim, hidden_size=latent_dim)
-        
-        self.reward_model = RewardModel(latent_dim, state_dim, reward_dim)
-        action_dim = action_dim.shape[0]
-        self.transition_pre = nn.Linear(state_dim + action_dim, latent_dim)
-        self.transition_post = nn.Linear(latent_dim, 2 * state_dim)
-        self.representation_pre = nn.Linear((latent_dim + compute_encoder_output_size((1, 1, o_dim[0], o_dim[1], 3), self.encoder)), latent_dim)
-        self.representation_post = nn.Linear(latent_dim, 2 * state_dim)
+        self.reward_model = RewardModel(self.latent_dim, self.state_dim, self.reward_dim)
+        self.action_dim = action_dim.shape[0]
+        self.transition_pre = nn.Linear(self.state_dim + self.action_dim, self.latent_dim)
+        self.transition_post = nn.Linear(self.latent_dim, 2 * self.state_dim)
+        self.representation_pre = nn.Linear(self.latent_dim + self.o_feature_dim, self.latent_dim)
+        self.representation_post = nn.Linear(self.latent_dim, 2 * self.state_dim)
         self.relu = nn.ReLU()
+
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     def forward(self, prev_state, actions, prev_belief, observations = None, nonterminals = None):
@@ -40,7 +48,7 @@ class RSSM(nn.Module):
         actions = actions.to(self.device)
         if observations is not None:
             observations = observations.to(self.device)
-        
+        # print(f"observations : {observations}")
         encoded_observation = self.encoder(observations.float())
         T = actions.size(1) + 1
         batch_size = actions.size(0)
@@ -98,6 +106,19 @@ class RSSM(nn.Module):
         hidden = [beliefs[:, 1:], prior_states[:, 1:], prior_means[:, 1:], prior_std_devs[:, 1:]]
         if observations is not None:
             hidden += [posterior_states[:, 1:], posterior_means[:, 1:], posterior_std_devs[:, 1:], decoded_observations, rewards]
+        
+        # Plot the observation input and output
+        # fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+        
+        # axes[0].imshow(observations[0, -1].cpu().detach())
+        # axes[0].axis('off')
+        # axes[0].set_title("Last Input Observation")
+        
+        # axes[1].imshow(decoded_observations[0, -1].cpu().detach())
+        # axes[1].axis('off')
+        # axes[1].set_title("Last Decoded Observation")
+        
+        # plt.show()
         return hidden
 
 ## Reward Model as defined by Reward Model qθ(rt | st):  
