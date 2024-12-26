@@ -8,6 +8,7 @@ import wandb
 import pickle
 import gzip
 import torch.nn.functional as F
+from value_functions import compute_Vlambda
 
 if torch.cuda.is_available():
   device = torch.device('cuda')
@@ -92,38 +93,38 @@ class Dreamer(nn.Module):
         self.RSSM_optimizer = torch.optim.Adam(self.RSSM.parameters(), lr =6e-4)
 
     # Sparkly fun things going on here
-    def latent_imagine(self, latents, posterior, horizon : int):
-    # Latent imagination receives the latents and the posterior where the latents are the probability distribution over possible events whereas the posterior is the deterministic
+    # def latent_imagine(self, latents, posterior, horizon : int):
+    # # Latent imagination receives the latents and the posterior where the latents are the probability distribution over possible events whereas the posterior is the deterministic
 
-    # Posterior is a M x N vector representing the state at each different index
-    # Latent is a M x N vector representing the latent at each different index
-        x, y = posterior.shape
+    # # Posterior is a M x N vector representing the state at each different index
+    # # Latent is a M x N vector representing the latent at each different index
+    #     x, y = posterior.shape
 
-        # imagined_state = posterior.reshape(x * y, -1)
-        # imagined_latent = latents.reshape(x * y, -1)
-        imagined_state = posterior
-        imagined_latent = latents
-        action = self.actor(torch.cat([imagined_state, imagined_latent], -1))
-        # print(f"Action Reshape {action.reshape(x, y, -1)}")
+    #     # imagined_state = posterior.reshape(x * y, -1)
+    #     # imagined_latent = latents.reshape(x * y, -1)
+    #     imagined_state = posterior
+    #     imagined_latent = latents
+    #     action = self.actor(torch.cat([imagined_state, imagined_latent], -1))
+    #     # print(f"Action Reshape {action.reshape(x, y, -1)}")
 
-        latent_list = [imagined_latent]
-        state_list = [imagined_state]
-        action_list = [action]
+    #     latent_list = [imagined_latent]
+    #     state_list = [imagined_state]
+    #     action_list = [action]
 
-        for _ in range(horizon):
-            state = self.RSSM(imagined_state, action_list, imagined_latent)
-            imagined_state, imagined_latent = state[0], state[1]
-            action = self.actor(torch.cat([imagined_state, imagined_latent], -1))
-            # action.reshape(x, y, -1)
-            latent_list.append(imagined_latent)
-            state_list.append(imagined_state)
-            action_list.append(action)
+    #     for _ in range(horizon):
+    #         state = self.RSSM(imagined_state, action_list, imagined_latent)
+    #         imagined_state, imagined_latent = state[0], state[1]
+    #         action = self.actor(torch.cat([imagined_state, imagined_latent], -1))
+    #         # action.reshape(x, y, -1)
+    #         latent_list.append(imagined_latent)
+    #         state_list.append(imagined_state)
+    #         action_list.append(action)
         
-        latent_list = torch.stack(latent_list, dim = 0)
-        state_list = torch.stack(state_list, dim = 0)
-        action_list = torch.stack(action_list, dim = 0)
+    #     latent_list = torch.stack(latent_list, dim = 0)
+    #     state_list = torch.stack(state_list, dim = 0)
+    #     action_list = torch.stack(action_list, dim = 0)
 
-        return latent_list, state_list, action_list
+    #     return latent_list, state_list, action_list
 
     # Will return new trajectories of states and actions that will be used to train our model
     def model_update(self):
@@ -154,11 +155,36 @@ class Dreamer(nn.Module):
             nonterminals=torch.logical_not(dones).to(device), 
             observations=states.to(device)
         )
-        
+
+
         # Calculate the MSE loss for observation and decoded observation
         mse_loss = nn.MSELoss()
         # print(f"States : {states.shape}")
         # print(f"Decoded  : {decoded_observations.shape}")
+        # print(f"States shape: {states.shape}")
+        # print("State: ", states[0])
+        # print("Decoded: ", decoded_observations[0])
+        # import matplotlib.pyplot as plt
+
+        # # Select the first state and decoded observation in the batch to plot
+        # state_to_plot = states[0, 0].cpu().detach().numpy()
+        # decoded_to_plot = decoded_observations[0, 0].cpu().detach().numpy()
+
+        # # Create a figure with two subplots
+        # fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+
+        # # Plot the state using matplotlib
+        # axes[0].imshow(state_to_plot)
+        # axes[0].set_title("State at index [0, 0]")
+        # axes[0].axis('off')
+
+        # # Plot the decoded observation using matplotlib
+        # axes[1].imshow(decoded_to_plot)
+        # axes[1].set_title("Decoded at index [0, 0]")
+        # axes[1].axis('off')
+
+        # # Show the plots
+        # plt.show()
         observation_loss = mse_loss(states.float(), decoded_observations)
         
         # Calculate the KL divergence loss between the prior and posterior distributions
@@ -166,14 +192,15 @@ class Dreamer(nn.Module):
             torch.distributions.Normal(posterior_means, posterior_std_devs),
             torch.distributions.Normal(prior_means, prior_std_devs)
         ).mean()
+
+        # print(f"Rewards Real Shape: {rewards_real.shape}")
+        # print(f"Rewards Shape: {rewards.shape}")
+        # Calculate the reward loss between the real rewards and the imagined rewards
         
-        # beliefs, states, actions = self.latent_imagine(prev_state.to(device), posterior_means.to(device), self.horizon)
-        ## TODO: Calculate the following properly!!!!
-        # Calculate the reward loss
-        
-        # reward_loss = mse_loss(rewards_real.float().to(device), rewards.squeeze()).float()
-        # Total loss
-        total_loss = observation_loss + 0.1 *  kl_loss
+        reward_loss = mse_loss(rewards_real.float().unsqueeze(2), rewards.float())
+        # print(f"Reward Loss: {reward_loss.item()}")
+
+        total_loss = observation_loss + 0.1 *  kl_loss + reward_loss
 
         # Backpropagation and optimization
         self.RSSM_optimizer.zero_grad()
@@ -187,122 +214,181 @@ class Dreamer(nn.Module):
         #     "reward_loss": reward_loss.item(),
         #     "total_loss": total_loss.item()
         # })
-        beliefs = None
-        reward_loss = None
-        return beliefs, states, actions, reward_loss, kl_loss, observation_loss
-
-
-    # The agent is only training on the imagined states. All compute trajectories are imagined.
+        return latent_spaces, prior_states, posterior_states, actions, reward_loss, kl_loss, observation_loss, rewards
+    
     def agent_update(
             self,
             beliefs,
             states,
-            actions,
+            imagined_rewards
         ):
-
-        # Generates 50 random datapoints of length 50
-        # This is going to have the reward of each state generated
-        rewards = self.RSSM(states, actions, beliefs)[-1]
-        # rewards = rewards.reshape(self.num_points, self.data_length, -1)
-        # This is going to have the value of each state generated, we want to flatten because the 
-        # print(f'beliefs: {beliefs.shape}')
-        # print(f'states: {states.shape}')
-        values = self.critic(torch.cat([states, beliefs], dim = -1).detach())
-        # values = values.reshape(self.num_points, self.data_length, -1)
-
-        # This should return the returns for each of the 50 randomly genearted trajectories
-
-        discounts = self.gamma * torch.ones_like(torch.cat([states, beliefs], dim = -1).detach())
-        discount_arr = torch.cat([torch.ones_like(discounts[:1]), discounts[1:]])
-        discount = torch.cumprod(discount_arr[:-1], 0)
         
-        # print(f"reward: {rewards.shape}")
-        # print(f"values: {values}")
-        # returns = self.find_predicted_returns(
-        #     rewards[:, :-1], # Remember that the batch_sample is two dimensional which means that the rewards and values will be two dimensional
-        #     values.mean[:, :-1],
-        #     last_reward = rewards[:, -1],
-        #     _lambda = self.lambda_
-        # )
-
-        returns = self.find_predicted_returns(
-            rewards[-1], # Remember that the batch_sample is two dimensional which means that the rewards and values will be two dimensional
-            values.mean[-1],
-            last_reward = rewards[-1],
-            _lambda = self.lambda_
+        # print(f"Started Update")
+        # print(f"States shape: {states.shape}")
+        # print(f"Beliefs shape: {beliefs.shape}")
+        imagined_beliefs, imagined_states, imagined_actions, imagined_rewards = self.imagine_rollout(
+            start_belief=beliefs[:, 0],
+            start_state=states[:, 0],
+            horizon=self.horizon
         )
+
+        # print(f"Imagined States shape: {imagined_states.shape}")
+        # print(f"Imagined Beliefs shape: {imagined_beliefs.shape}")
+
+        # Compute critic rewards for imagined states and beliefs
+        imagined_beliefs = imagined_beliefs.transpose(0, 1)
+        imagined_states = imagined_states.transpose(0, 1)
+        imagined_actions = imagined_actions.transpose(0, 1)
+        imagined_rewards = imagined_rewards.transpose(0, 1)
+        imagined_rewards = imagined_rewards.unsqueeze(2)
+        # print(f"Imagined Rewards shape: {imagined_rewards.shape}")
+        critic_rewards, distribution = self.critic(torch.cat([imagined_states.detach(), imagined_beliefs.detach()], dim=-1))
+        # print(f"Critic rewards shape: {critic_rewards.shape}")
+
+        # Ensure critic_rewards requires grad
         
-        actor_loss = -torch.mean(discount * returns)
-        # print(f"returns: {returns}")
+
+        imagined_values = compute_Vlambda(
+            states=imagined_states,
+            rewards=imagined_rewards,
+            tau=0,
+            H=self.horizon,
+            gamma=self.gamma,
+            lam=self.lambda_,
+            value_fn_rewards=critic_rewards
+        )
+
+        imagined_values = imagined_values.requires_grad_()
+        critic_rewards = critic_rewards.requires_grad_()
+        wandb.log({"critic_rewards_sum": critic_rewards.sum().item(), "num_timesteps": self.num_timesteps})
+        # print(f"Imagined values: {imagined_values.shape}")
+
+        # Update actor parameters (ϕ)
+        # print(f"Imagined values shape: {imagined_values.shape}")
+        actor_loss = -imagined_values.sum()
         self.actor_optimizer.zero_grad()
-        actor_loss.backward(retain_graph=True)
+        actor_loss.backward()  
         self.actor_optimizer.step()
 
-        # with torch.no_grad():
-        #     values = self.critic(torch.cat([states, beliefs], dim = -1)[:,:-1])
+        # Update critic parameters (ψ)
+        target_values = imagined_values.detach()
+        # print(f"Target values shape: {target_values.shape}")
+        critic_loss = 0.5 * (critic_rewards - target_values).pow(2).sum()
         self.critic_optimizer.zero_grad()
-        critic_loss = -torch.mean(values.log_prob(returns))# For value loss (critic loss), we want to find the log probability of finding that returns for the given value predicted
         critic_loss.backward()
         self.critic_optimizer.step()
 
-        # Log losses to wandb
-        # wandb.log({
-        #     "actor_loss": actor_loss.item(),
-        #     "critic_loss": critic_loss.item()
-        # })
+        return actor_loss, critic_loss
+    
 
-        # Use Log_prob as loss instead of MSE
-        # Actor loss is the negative of the predicted returns
-        # Value loss is the "KL" loss between the predicted value and the actual value 
-        return actor_loss, critic_loss # Return the world model loss, actor loss, critic loss
+    def imagine_rollout(self, start_belief, start_state, horizon):
+        beliefs = []
+        states = []
+        actions = []
+        rewards = []
+        b, s = start_belief, start_state
+        for t in range(horizon):
+            a = self.sample_action(torch.cat([b, s], dim=-1).to(self.device))
+            if a.ndimension() == 2:
+                a = a.unsqueeze(1)
+            a = torch.tensor(a, dtype=torch.float32).to(self.device)
+            
+            # forward the RSSM with (b, s, a) => next_b, next_s, 
+            b = b.squeeze(1)
+            s = s.squeeze(1)
+            rssm_outputs = self.RSSM(b, a, s)
+            b, s = rssm_outputs[:2]
+            r = rssm_outputs[-1]
+            # store them
+            beliefs.append(b)
+            states.append(s)
+            actions.append(a)
+            rewards.append(r)
+
+        beliefs = torch.stack(beliefs).squeeze()
+        states = torch.stack(states).squeeze()
+        actions = torch.stack(actions)
+        rewards = torch.stack(rewards).squeeze()
+
+        # print("Beliefs shape:", beliefs.shape)
+        # print("States shape:", states.shape)
+        # print("Actions shape:", actions.shape)
+        # print("Rewards shape:", rewards.shape)
+        
+        return beliefs, states, actions, rewards
+
 
     def rollout(
         self,
         use_RSSM = False
     ):
         total_rewards = 0
+        self.prev_state = torch.zeros((1, self.RSSM.state_dim)).to(self.device)
+        self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim)).to(self.device)
         for t in range(self.batch_train_freq):
             self.num_timesteps += 1
-            action = self.sample_action(torch.cat([self.prev_state.squeeze(), self.prev_latent_space.squeeze()], dim = -1).to(device))
+            action = self.sample_action(torch.cat([self.prev_state.squeeze(), self.prev_latent_space.squeeze()], dim=-1).to(self.device))
             action = torch.tensor(action, dtype=torch.float32).to(self.device)
             if action.dim() == 1:
                 action = action.reshape(1, action.shape[0])
             timestep = self.env.step(action.cpu())
+            # print("TIMESTEP: ", timestep)
             obs = torch.tensor(self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w).copy()).to(self.device)
             obs = obs.reshape(1, obs.shape[0], obs.shape[1], obs.shape[2]).detach()
             action = action.reshape(1, action.shape[0], action.shape[1])
             if use_RSSM:
                 states = self.RSSM(
-                    self.prev_state.to(device), 
-                    action.to(device), 
-                    self.prev_latent_space.to(device), 
-                    nonterminals=1-timestep.last(), 
-                    observations=obs.to(device)
+                    self.prev_state.to(self.device).unsqueeze(0), 
+                    action.to(self.device),
+                    self.prev_latent_space.to(self.device).unsqueeze(0), 
+                    nonterminals=(1-timestep.last()), 
+                    observations=obs.to(self.device).unsqueeze(0),
                 )
 
-                print(f"States {states}")
                 if obs is not None:
+                    
                     latent_spaces, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs, decoded_observations, rewards = states
+                    self.prev_state = posterior_states[:, -1]
+                    self.prev_latent_space = latent_spaces[:, -1]
+                    # import matplotlib.pyplot as plt
+
+                    
+                    
+                    # print("Decoded Observation:", decoded_observations)
+                    # print("Observation shape:", obs.shape)
+                    # print("Decoded Observation shape:", decoded_observations.shape)
+                    # print("Observation min:", obs.min().item(), "max:", obs.max().item())
+                    # print("Decoded Observation min:", decoded_observations.min().item(), "max:", decoded_observations.max().item())
+                    # fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+                    # axes[0].imshow(obs[0].cpu().detach().numpy())
+                    # axes[0].axis('off')
+                    # axes[0].set_title("Current Observation")
+                    
+                    # axes[1].imshow(decoded_observations[0, -1].cpu().detach().numpy())
+                    # axes[1].axis('off')
+                    # axes[1].set_title("Decoded Observation")
+
+                    # plt.show()
                 else:
                     latent_spaces, prior_states, prior_means, prior_std_devs, rewards = states
-
-                self.prev_state = None
-                self.prev_latent_space = None
+                    self.prev_state = prior_states[:, -1]
+                    self.prev_latent_space = latent_spaces[:, -1]
 
             self.replayBuffer.add(self.last_obs, action, timestep.reward, obs, timestep.last())
+            
             self.last_obs = obs
 
             total_rewards += timestep.reward
 
-        # Log total rewards after every rollout
-        wandb.log({"total_rewards": total_rewards, "num_timesteps": self.num_timesteps})
+        if (self.num_timesteps >= self.steps_of_sampling):
+            wandb.log({"total_rewards": total_rewards, "num_timesteps": self.num_timesteps})
 
     def train(
         self,
         timesteps : int,
         num_points : int,
         data_length : int,
-        update_steps : int = 10,
+        update_steps : int = 15,
     ):
         self.num_points = num_points
         self.data_length = data_length
@@ -329,9 +415,7 @@ class Dreamer(nn.Module):
 
         while (self.num_timesteps < timesteps):
             # wandb.init(project="dreamer_training", reinit=True)
-            print(f"In Rollout")
-            self.rollout()
-            print(f"Out Rollout")
+            
             total_actor_loss = 0
             total_critic_loss = 0
             total_reward_loss = 0
@@ -339,26 +423,40 @@ class Dreamer(nn.Module):
             total_decoder_loss = 0
             for i in range(update_steps):
                 print(f"i : {i}")
-                beliefs, states, actions, reward_loss, kl_loss, decoder_loss = self.model_update()
+
+                ###*Dynamics Learning*###
+                beliefs, states, posterior_states, actions, reward_loss, kl_loss, decoder_loss, imagined_rewards = self.model_update()
+                
+                # actions = self.actor(torch.cat([beliefs, states], dim=-1))
 
                 # The data that the agent update receives should be the encoded space already to save memory
                 # beliefs = beliefs.detach()
-                states = states.detach()
-                actions = actions.detach()
-                # actor_loss, critic_loss = self.agent_update(beliefs, states, actions)
+                # states = states.detach()
+                # actions = actions.detach()
+                
+
+
+                ###*Behavior Learning*###
+                actor_loss, critic_loss = self.agent_update(beliefs, states, imagined_rewards)
+
                 # total_actor_loss += actor_loss.item()
                 # total_critic_loss += critic_loss.item()
-                # total_reward_loss += reward_loss.item()
+                total_reward_loss += reward_loss.item()
                 total_kl_loss += kl_loss.item()
                 total_decoder_loss += decoder_loss.item()
+                print(f"Reward Loss: {reward_loss}")
                 wandb.log({
                     "num_timesteps": self.num_timesteps,
-                    # "actor_loss": actor_loss.item(),
-                    # "critic_loss": critic_loss.item(),
-                    # "reward_loss" : reward_loss,
+                    "actor_loss": actor_loss.item(),
+                    "critic_loss": critic_loss.item(),
+                    "reward_loss" : reward_loss.item(),
                     "observation_loss" : decoder_loss,
                     "kl_loss" : kl_loss.item()
                 })
+            
+
+            self.rollout(use_RSSM=True)
+            
 
             avg_actor_loss = total_actor_loss / update_steps
             avg_critic_loss = total_critic_loss / update_steps
@@ -393,36 +491,38 @@ class Dreamer(nn.Module):
             return random_action
         elif not predict_mode:
             predict = self.actor(pixels).detach()
-            return predict + 0.3 * torch.randn_like(predict).detach()
+            return (predict + 0.3 * torch.randn_like(predict).detach())
         else:
             return self.actor(pixels).detach()
+
 
 
 # Help from https://github.com/juliusfrost/dreamer-pytorch/blob/main/dreamer/algos/dreamer_algo.py for finding returns
 # http://www.incompleteideas.net/book/RLbook2020.pdf
 
-# Note that we are finding bootstrapped returns and not monte carlo returns at this step
-    def find_predicted_returns(
-        self,
-        pred_rewards,
-        pred_values,
-        last_reward,
-        _lambda
-    ):
-        # Next, we need to calculate the predicted targets of the next states (This is just current_reward + (1 - lambda) * gamma * next_value)        
-        targets = pred_rewards + (1 - _lambda) * pred_values
-        # Since we are using TD-lambda for finding the returns, this essentially correspond to the point that the returns on to 
-        curr_val = last_reward
-        outputs = []
+    # def find_predicted_returns(
+    #     self,
+    #     pred_rewards,
+    #     pred_values,
+    #     last_value,
+    #     _lambda,
+    #     gamma
+    # ):
 
-        for i in range(pred_rewards.shape[1] - 1, -1, -1):
-            curr_val = targets[i] + _lambda * curr_val
-            outputs.append(curr_val)
-        outputs = torch.stack(outputs, dim = 1)
-        outputs = torch.flip(outputs, [0])
-        # print(f"outputs: {outputs}")
-        return outputs
+    #     returns = []
+
+    #     curr_val = last_value
         
+    #     print(f"Predicted rewards shape: {pred_rewards.shape}")
+    #     print(f"Predicted values shape: {pred_values.shape}")
+    #     for i in range(pred_rewards.shape[1] - 1, -1, -1):
+    #         curr_val = pred_rewards[:, i] + gamma * ((1 - _lambda) * pred_values[:, i] + _lambda * curr_val)
+    #         returns.append(curr_val)
+
+    #     returns.reverse()
+
+    #     return torch.stack(returns, dim=1)
+
     def save_models(self, num_timestep):
         self.actor.save_model(num_timestep)
         self.critic.save_model(num_timestep)
@@ -462,7 +562,10 @@ class DenseConnections(nn.Module):
             # Construct a diagonal covariance matrix from std
             cov_mat = torch.diag_embed(std**2)
             
-            return MultivariateNormal(mean, cov_mat)
+            dist = MultivariateNormal(mean, cov_mat)
+            sample = dist.rsample()  
+            
+            return sample, dist
         else: # For the actor model
             mean, std = torch.chunk(self.l3(x), 2, dim = -1)
             action = torch.tanh(mean + std.detach() * torch.randn_like(mean))

@@ -18,6 +18,23 @@ class Buffer():
             torch.tensor(done).to(self.device)
         ))
         self.curr_idx = (self.curr_idx + 1) % self.buffer_size
+        self.print_buffer_shape()
+        
+    def print_buffer_shape(self):
+        if len(self.buffer) > 0:
+            state_shape = self.buffer[0][0].shape
+            action_shape = self.buffer[0][1].shape
+            reward_shape = self.buffer[0][2].shape
+            next_state_shape = self.buffer[0][3].shape
+            done_shape = self.buffer[0][4].shape
+            print(f"Buffer contains {len(self.buffer)} elements.")
+            print(f"State shape: {state_shape}")
+            print(f"Action shape: {action_shape}")
+            print(f"Reward shape: {reward_shape}")
+            print(f"Next state shape: {next_state_shape}")
+            print(f"Done shape: {done_shape}")
+        else:
+            print("Buffer is empty.")
 
 
     def sample_idx(self, data_length : int):
@@ -93,6 +110,8 @@ class Buffer():
             batch_rewards[i] = idx_sequence_rewards
             batch_next_states[i] = idx_sequence_next_states
             batch_dones[i] = idx_sequence_dones
+
+        
 
         return batch_states, batch_actions, batch_rewards, batch_next_states, batch_dones
 

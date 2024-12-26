@@ -23,6 +23,7 @@ class ConvEncoder(nn.Module):
 
     def forward(self, obs):
         obs = obs.to(self.device)
+        # print(f"Obs Shape : {obs.shape}")
         obs = obs.permute(0, 1, 4, 2, 3)
         B, T, C, H, W = obs.shape
         x = obs.view(B * T, C, H, W)
