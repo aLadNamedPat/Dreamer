@@ -266,7 +266,8 @@ class Dreamer(nn.Module):
 
         # Update actor parameters (ϕ)
         # print(f"Imagined values shape: {imagined_values.shape}")
-        actor_loss = -imagined_values.sum()
+        
+        actor_loss = -imagined_values.sum(dim=1).mean(dim=0)
         self.actor_optimizer.zero_grad()
         actor_loss.backward()  
         self.actor_optimizer.step()
@@ -274,7 +275,7 @@ class Dreamer(nn.Module):
         # Update critic parameters (ψ)
         target_values = imagined_values.detach()
         # print(f"Target values shape: {target_values.shape}")
-        critic_loss = 0.5 * (critic_rewards - target_values).pow(2).sum()
+        critic_loss = 0.5 * (critic_rewards - target_values).pow(2).sum(dim=1).mean(dim=0)
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         self.critic_optimizer.step()
@@ -391,7 +392,7 @@ class Dreamer(nn.Module):
         data_length : int,
         update_steps : int = 15,
         video_interval : int = 100,  # New parameter for video saving interval
-        video_path : str = "training_video.avi"  # New parameter for video path
+        video_path : str = "training_video.mp4"  # New parameter for video path
     ):
         self.num_points = num_points
         self.data_length = data_length
@@ -442,12 +443,10 @@ class Dreamer(nn.Module):
                     "kl_loss" : kl_loss.item()
                 })
 
-                # Increment timestep
-                self.num_timesteps += 1
 
                 # Save observations to video at specified intervals
                 if self.num_timesteps % video_interval == 0:
-                    self.save_observations_to_video(eval_steps=10, video_path=video_path)
+                    self.save_observations_to_video(eval_steps=self.sample_steps, video_path=video_path)
 
             self.rollout(use_RSSM=True)
 
@@ -489,8 +488,11 @@ class Dreamer(nn.Module):
             return self.actor(pixels).detach()
 
     def save_observations_to_video(self, eval_steps: int, video_path: str):
-        fourcc = cv2.VideoWriter_fourcc(*'XVID')
-        out = cv2.VideoWriter(video_path, fourcc, 20.0, (self.img_w, self.img_h))
+        # Append num_timesteps to the video_path
+        video_path_with_timesteps = f"{video_path}_{self.num_timesteps}.mp4"
+        
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(video_path_with_timesteps, fourcc, 20.0, (self.img_w, self.img_h))
 
         obs = self.env.reset()
         render = self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w)
@@ -503,6 +505,9 @@ class Dreamer(nn.Module):
             action = torch.tensor(action, dtype=torch.float32).to(self.device)
             if action.dim() == 1:
                 action = action.reshape(1, action.shape[0])
+            # Ensure action has the correct dimensions
+            if action.dim() == 2:
+                action = action.unsqueeze(1)  # Add a dimension if necessary
             timestep = self.env.step(action.cpu())
             obs = torch.tensor(self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w).copy()).to(self.device)
             obs = obs.reshape(1, obs.shape[0], obs.shape[1], obs.shape[2]).detach()
@@ -556,13 +561,12 @@ class Dreamer(nn.Module):
 
         with gzip.open(f"Buffers/buffer{num_timestep}", 'rb') as f:
             self.memory = pickle.load(f)
-
 class DenseConnections(nn.Module):
     def __init__(self, 
-                 input_dims : int, 
-                 output_dims : int, 
-                 mid_dims :int = 300, 
-                 action_model : bool = False):
+                 input_dims: int, 
+                 output_dims: int, 
+                 mid_dims: int = 300, 
+                 action_model: bool = False):
         super(DenseConnections, self).__init__()
         self.l1 = nn.Linear(input_dims, mid_dims)
         self.l2 = nn.Linear(mid_dims, mid_dims)
@@ -570,7 +574,7 @@ class DenseConnections(nn.Module):
 
         self.action_model = action_model
 
-    def forward(self, input : torch.Tensor):
+    def forward(self, input: torch.Tensor):
         x = nn.ELU()(self.l1(input))
         x = nn.ELU()(self.l2(x))
         if not self.action_model:  # For the value model
@@ -586,9 +590,12 @@ class DenseConnections(nn.Module):
             sample = dist.rsample()  
             
             return sample, dist
-        else: # For the actor model
-            mean, std = torch.chunk(self.l3(x), 2, dim = -1)
-            action = torch.tanh(mean + std.detach() * torch.randn_like(mean))
+        else:  # For the actor model
+            mean, std = torch.chunk(self.l3(x), 2, dim=-1)
+            mean = 5 * torch.tanh(mean)  # Scale the tanh mean by a factor of 5
+            std = F.softplus(std) + 1e-6  # Ensure std is positive
+            dist = MultivariateNormal(mean, torch.diag_embed(std**2))
+            action = torch.tanh(dist.rsample())  # Transform using tanh
             return action
 
     def save_model(self, num_steps):

@@ -31,7 +31,7 @@ class ConvEncoder(nn.Module):
         x = self.act(self.conv2(x))
         x = self.act(self.conv3(x))
         x = self.act(self.conv4(x))
-        x = x.view(x.size(0), -1)
+        x = x.reshape(x.size(0), -1)
         mu = self.fc_mu(x)
         logvar = self.fc_logvar(x)
         
@@ -68,11 +68,11 @@ class ConvDecoder(nn.Module):
         x = self.fc(features)
         x = self.act(x)
         
-        x = x.view(B * T, 8 * self.depth, 1, 1)
+        x = x.reshape(B * T, 8 * self.depth, 1, 1)
         x = self.act(self.deconv1(x))
         x = self.act(self.deconv2(x))
         x = self.act(self.deconv3(x))
         x = self.sigmoid(self.deconv4(x))
         
-        x = x.view(B, T, self.out_height, self.out_width, self.out_channels)
+        x = x.reshape(B, T, self.out_height, self.out_width, self.out_channels)
         return x

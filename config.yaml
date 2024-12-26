@@ -3,20 +3,20 @@ env:
   task_name: "run"
 
 dreamer:
-  state_dims: 32
-  latent_dims: 32
-  o_feature_dim: 32
+  state_dims: 64
+  latent_dims: 64
+  o_feature_dim: 64
   img_h : 64
   img_w : 64
-  reward_dim: 32
+  reward_dim: 64
   gamma: 0.99
   lambda_: 0.95
-  batch_size: 8
-  batch_train_freq: 10
+  batch_size: 50
+  batch_train_freq: 50
   buffer_size: 100000000
-  sample_steps: 10
-  steps_of_sampling: 50
-  horizon: 10
+  sample_steps: 50
+  steps_of_sampling: 250
+  horizon: 15
 
 training:
   timesteps: 10000
