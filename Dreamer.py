@@ -130,22 +130,11 @@ class Dreamer(nn.Module):
 
     # Will return new trajectories of states and actions that will be used to train our model
     def model_update(self):
-
         # Sample a batch of experiences from the replay buffer
         states, actions, rewards_real, next_states, dones = self.replayBuffer.sample(self.batch_size, self.sample_steps)
-        # print(states.shape)
-        # print(actions.shape)
-        # print(rewards_real.shape)
-        # print(dones.shape)
-
-        # Get the initial state and latent space
 
         prev_state = torch.zeros((self.batch_size, self.RSSM.state_dim)).to(self.device)
         prev_latent_space = torch.zeros((self.batch_size, self.RSSM.latent_dim)).to(self.device)
-        # Forward pass through the RSSM
-        # print(f"Dones: {dones}")
-        # print(f"actions: {actions.squeeze()}")
-        # print(f"states: {prev_state.shape}")
 
         # import pdb; pdb.set_trace()
 
@@ -158,8 +147,6 @@ class Dreamer(nn.Module):
             observations=states.to(device)
         )
 
-
-        # Calculate the MSE loss for observation and decoded observation
         mse_loss = nn.MSELoss()
         # print(f"States : {states.shape}")
         # print(f"Decoded  : {decoded_observations.shape}")
@@ -202,21 +189,16 @@ class Dreamer(nn.Module):
         reward_loss = mse_loss(rewards_real.float().unsqueeze(2), rewards.float())
         # print(f"Reward Loss: {reward_loss.item()}")
 
-        total_loss = observation_loss + 0.1 *  kl_loss + reward_loss
+        total_loss = observation_loss + 0.1 * kl_loss + reward_loss
 
         # Backpropagation and optimization
         self.RSSM_optimizer.zero_grad()
         total_loss.backward()
         self.RSSM_optimizer.step()
-        
-        # Log losses to wandb
-        # wandb.log({
-        #     "observation_loss": observation_loss.item(),
-        #     "kl_loss": kl_loss.item(),
-        #     "reward_loss": reward_loss.item(),
-        #     "total_loss": total_loss.item()
-        # })
-        
+
+        # Delete unused tensors
+        del prev_state, prev_latent_space, mse_loss, total_loss
+
         return latent_spaces, prior_states, posterior_states, actions, reward_loss, kl_loss, observation_loss, rewards, decoded_observations
     
     def agent_update(
@@ -235,21 +217,13 @@ class Dreamer(nn.Module):
             horizon=self.horizon
         )
 
-        # print(f"Imagined States shape: {imagined_states.shape}")
-        # print(f"Imagined Beliefs shape: {imagined_beliefs.shape}")
-
-        # Compute critic rewards for imagined states and beliefs
         imagined_beliefs = imagined_beliefs.transpose(0, 1)
         imagined_states = imagined_states.transpose(0, 1)
         imagined_actions = imagined_actions.transpose(0, 1)
         imagined_rewards = imagined_rewards.transpose(0, 1)
         imagined_rewards = imagined_rewards.unsqueeze(2)
-        # print(f"Imagined Rewards shape: {imagined_rewards.shape}")
-        critic_rewards, distribution = self.critic(torch.cat([imagined_states.detach(), imagined_beliefs.detach()], dim=-1))
-        # print(f"Critic rewards shape: {critic_rewards.shape}")
 
-        # Ensure critic_rewards requires grad
-        
+        critic_rewards, distribution = self.critic(torch.cat([imagined_states.detach(), imagined_beliefs.detach()], dim=-1))
 
         imagined_values = compute_Vlambda(
             states=imagined_states,
@@ -281,6 +255,9 @@ class Dreamer(nn.Module):
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         self.critic_optimizer.step()
+
+        # Delete unused tensors
+        del imagined_beliefs, imagined_states, imagined_actions, imagined_rewards, critic_rewards, distribution, imagined_values, target_values
 
         return actor_loss, critic_loss
     
@@ -445,11 +422,16 @@ class Dreamer(nn.Module):
                     "kl_loss" : kl_loss.item()
                 })
 
+                # Delete unused tensors to free memory
+                del beliefs, states, posterior_states, actions, imagined_rewards
+                torch.cuda.empty_cache()
+
                 # Save observations to video at specified intervals
                 # if self.num_timesteps % video_interval == 0:
                 #     self.save_observations_to_video(eval_steps=self.sample_steps, video_path=video_path)
 
             self.rollout(use_RSSM=True)
+            torch.cuda.empty_cache()
 
             avg_actor_loss = total_actor_loss / update_steps
             avg_critic_loss = total_critic_loss / update_steps
@@ -474,7 +456,7 @@ class Dreamer(nn.Module):
                 # Save the plot
                 plt.savefig(f"decoded_observation_{self.num_timesteps}.png")
                 plt.close()
-
+            del decoded_observations
             obs = self.env.reset()
             render = self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w)
             self.last_obs = torch.tensor(render.copy()).to(self.device)
@@ -482,7 +464,6 @@ class Dreamer(nn.Module):
             self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim)).to(self.device)
 
         return
-    
 
     ### NEED TO EDIT THIS SO THAT REPRESENTATION MODEL ENCODES THE VALUES
     def sample_action(

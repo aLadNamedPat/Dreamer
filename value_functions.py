@@ -3,20 +3,6 @@ import torch.nn as nn
 import math
 
 def compute_VkN(states, rewards, tau, k, H, gamma, value_fn_rewards):
-    """
-    Compute V_N^k(s_tau) for one rollout.
-
-    states: torch.Tensor of shape [batch_size, t, state_dim]
-    rewards: torch.Tensor of shape [batch_size, t, 1]
-    tau: the index at which we want the value
-    k: how many steps of returns we sum before bootstrapping
-    H: the horizon from the paper (for safety, we don't exceed t+H)
-    gamma: discount factor (0 < gamma <= 1)
-    value_fn_rewards: torch.Tensor of shape [batch_size, t, 1]
-
-    Returns: torch.Tensor of shape [batch_size, 1] value estimate of V_N^k(s_tau)
-    """
-
     # We'll define h = min(tau + k, tau + H), i.e., we don't exceed the horizon
     h = min(tau + k, tau + H)
 
@@ -35,21 +21,6 @@ def compute_VkN(states, rewards, tau, k, H, gamma, value_fn_rewards):
     return discounted_return
 
 def compute_Vlambda(states, rewards, tau, H, gamma, lam, value_fn_rewards):
-    """
-    Compute V_lambda(s_tau) and return a tensor of V_lambda values for each step.
-
-    states: torch.Tensor of shape [batch_size, t, state_dim]
-    rewards: torch.Tensor of shape [batch_size, t, 1]
-    tau: starting index for the value
-    H: horizon for imagination
-    gamma: discount factor
-    lam: lambda (0 <= lam <= 1)
-    value_fn_rewards: torch.Tensor of shape [batch_size, t, 1]
-
-    Returns: torch.Tensor of shape [batch_size, H, 1] for each step
-    """
-
-    # Tensor to store V_lambda values for each step
     v_lambda_tensor = torch.zeros(rewards.size(0), H, 1, device=rewards.device)
     
     # n goes from 1 to H, but note that the formula has H-1 in the sum
