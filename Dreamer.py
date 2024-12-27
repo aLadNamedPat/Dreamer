@@ -9,7 +9,8 @@ import pickle
 import gzip
 import torch.nn.functional as F
 from value_functions import compute_Vlambda
-import cv2
+import matplotlib.pyplot as plt
+# import cv2
 
 if torch.cuda.is_available():
   device = torch.device('cuda')
@@ -215,7 +216,8 @@ class Dreamer(nn.Module):
         #     "reward_loss": reward_loss.item(),
         #     "total_loss": total_loss.item()
         # })
-        return latent_spaces, prior_states, posterior_states, actions, reward_loss, kl_loss, observation_loss, rewards
+        
+        return latent_spaces, prior_states, posterior_states, actions, reward_loss, kl_loss, observation_loss, rewards, decoded_observations
     
     def agent_update(
             self,
@@ -267,7 +269,7 @@ class Dreamer(nn.Module):
         # Update actor parameters (ϕ)
         # print(f"Imagined values shape: {imagined_values.shape}")
         
-        actor_loss = -imagined_values.sum(dim=1).mean(dim=0)
+        actor_loss = -torch.sum(imagined_values, dim=1).mean(dim=0)
         self.actor_optimizer.zero_grad()
         actor_loss.backward()  
         self.actor_optimizer.step()
@@ -275,7 +277,7 @@ class Dreamer(nn.Module):
         # Update critic parameters (ψ)
         target_values = imagined_values.detach()
         # print(f"Target values shape: {target_values.shape}")
-        critic_loss = 0.5 * (critic_rewards - target_values).pow(2).sum(dim=1).mean(dim=0)
+        critic_loss = 0.5 * torch.sum((critic_rewards - target_values).pow(2), dim=1).mean(dim=0)
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         self.critic_optimizer.step()
@@ -425,7 +427,7 @@ class Dreamer(nn.Module):
                 print(f"i : {i}")
 
                 ###*Dynamics Learning*###
-                beliefs, states, posterior_states, actions, reward_loss, kl_loss, decoder_loss, imagined_rewards = self.model_update()
+                beliefs, states, posterior_states, actions, reward_loss, kl_loss, decoder_loss, imagined_rewards, decoded_observations = self.model_update()
 
                 ###*Behavior Learning*###
                 actor_loss, critic_loss = self.agent_update(beliefs, states, imagined_rewards)
@@ -443,10 +445,9 @@ class Dreamer(nn.Module):
                     "kl_loss" : kl_loss.item()
                 })
 
-
                 # Save observations to video at specified intervals
-                if self.num_timesteps % video_interval == 0:
-                    self.save_observations_to_video(eval_steps=self.sample_steps, video_path=video_path)
+                # if self.num_timesteps % video_interval == 0:
+                #     self.save_observations_to_video(eval_steps=self.sample_steps, video_path=video_path)
 
             self.rollout(use_RSSM=True)
 
@@ -457,6 +458,22 @@ class Dreamer(nn.Module):
             avg_decoder_loss = total_decoder_loss / update_steps
 
             print(f"Timestep: {self.num_timesteps}, Avg Actor Loss: {avg_actor_loss}, Avg Critic Loss: {avg_critic_loss}, Avg Reward Loss: {avg_reward_loss}, Avg KL Loss: {avg_kl_loss}, Avg Decoder Loss: {avg_decoder_loss}")
+
+            if self.num_timesteps % video_interval == 0:
+                # Save the first decoded observation in the batch to plot
+                decoded_to_plot = decoded_observations[0, 0].cpu().detach().numpy()
+
+                # Create a figure
+                plt.figure(figsize=(5, 5))
+
+                # Plot the decoded observation using matplotlib
+                plt.imshow(decoded_to_plot)
+                plt.title("Decoded at index [0, 0]")
+                plt.axis('off')
+
+                # Save the plot
+                plt.savefig(f"decoded_observation_{self.num_timesteps}.png")
+                plt.close()
 
             obs = self.env.reset()
             render = self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w)
@@ -487,40 +504,40 @@ class Dreamer(nn.Module):
         else:
             return self.actor(pixels).detach()
 
-    def save_observations_to_video(self, eval_steps: int, video_path: str):
-        # Append num_timesteps to the video_path
-        video_path_with_timesteps = f"{video_path}_{self.num_timesteps}.mp4"
+    # def save_observations_to_video(self, eval_steps: int, video_path: str):
+    #     # Append num_timesteps to the video_path
+    #     video_path_with_timesteps = f"{video_path}_{self.num_timesteps}.mp4"
         
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(video_path_with_timesteps, fourcc, 20.0, (self.img_w, self.img_h))
+    #     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    #     out = cv2.VideoWriter(video_path_with_timesteps, fourcc, 20.0, (self.img_w, self.img_h))
 
-        obs = self.env.reset()
-        render = self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w)
-        self.last_obs = torch.tensor(render.copy()).to(self.device)
-        self.prev_state = torch.zeros((1, self.RSSM.state_dim)).to(self.device)
-        self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim)).to(self.device)
+    #     obs = self.env.reset()
+    #     render = self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w)
+    #     self.last_obs = torch.tensor(render.copy()).to(self.device)
+    #     self.prev_state = torch.zeros((1, self.RSSM.state_dim)).to(self.device)
+    #     self.prev_latent_space = torch.zeros((1, self.RSSM.latent_dim)).to(self.device)
 
-        for t in range(eval_steps):
-            action = self.sample_action(torch.cat([self.prev_state.squeeze(), self.prev_latent_space.squeeze()], dim=-1).to(self.device), predict_mode=True)
-            action = torch.tensor(action, dtype=torch.float32).to(self.device)
-            if action.dim() == 1:
-                action = action.reshape(1, action.shape[0])
-            # Ensure action has the correct dimensions
-            if action.dim() == 2:
-                action = action.unsqueeze(1)  # Add a dimension if necessary
-            timestep = self.env.step(action.cpu())
-            obs = torch.tensor(self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w).copy()).to(self.device)
-            obs = obs.reshape(1, obs.shape[0], obs.shape[1], obs.shape[2]).detach()
-            self.prev_state, self.prev_latent_space = self.RSSM(self.prev_state, action, self.prev_latent_space)[:2]
+    #     for t in range(eval_steps):
+    #         action = self.sample_action(torch.cat([self.prev_state.squeeze(), self.prev_latent_space.squeeze()], dim=-1).to(self.device), predict_mode=True)
+    #         action = torch.tensor(action, dtype=torch.float32).to(self.device)
+    #         if action.dim() == 1:
+    #             action = action.reshape(1, action.shape[0])
+    #         # Ensure action has the correct dimensions
+    #         if action.dim() == 2:
+    #             action = action.unsqueeze(1)  # Add a dimension if necessary
+    #         timestep = self.env.step(action.cpu())
+    #         obs = torch.tensor(self.env.physics.render(camera_id=0, height=self.img_h, width=self.img_w).copy()).to(self.device)
+    #         obs = obs.reshape(1, obs.shape[0], obs.shape[1], obs.shape[2]).detach()
+    #         self.prev_state, self.prev_latent_space = self.RSSM(self.prev_state, action, self.prev_latent_space)[:2]
 
-            frame = obs[0].cpu().numpy()
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            out.write(frame)
+    #         frame = obs[0].cpu().numpy()
+    #         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    #         out.write(frame)
 
-            if timestep.last():
-                break
+    #         if timestep.last():
+    #             break
 
-        out.release()
+    #     out.release()
 
 # Help from https://github.com/juliusfrost/dreamer-pytorch/blob/main/dreamer/algos/dreamer_algo.py for finding returns
 # http://www.incompleteideas.net/book/RLbook2020.pdf
